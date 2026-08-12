@@ -101,15 +101,17 @@ type Status struct {
 	// таймауты рукопожатия), а не про связь с дата-центрами.
 	Connections    int64
 	ConnectionsBad int64
-	TopBadClasses  []ClassCount
-	// Сбои рукопожатия — отдельный блок в панели, отдельная строка и здесь.
-	HandshakeFails    int64
-	TopHandshakeFails []ClassCount
+	// BadClasses и HandshakeClasses — разбор по причинам целиком, по убыванию.
+	// Сколько строк показать, решает отрисовка: только там известно, сколько
+	// места осталось в сообщении.
+	BadClasses []ClassCount
+	// Сбои рукопожатия — отдельный блок в панели, отдельный и здесь.
+	HandshakeFails   int64
+	HandshakeClasses []ClassCount
 	// Активные адреса и суммарный трафик — сумма по списку пользователей.
 	ActiveIPs  int64
 	TrafficOct int64
 	Users      int64
-	UptimeSecs int64
 
 	// ── Итог ─────────────────────────────────────────────────────────────
 	Level Level

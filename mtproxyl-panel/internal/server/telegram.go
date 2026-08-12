@@ -38,6 +38,10 @@ type TelegramBotConfig struct {
 	// StatusMessageID — то самое единственное живое сообщение. Переживает
 	// перезапуск панели, иначе каждый рестарт плодил бы в чате новое.
 	StatusMessageID int `json:"status_message_id,omitempty"`
+	// ServiceMessageID — последний служебный ответ бота (справка, подтверждение
+	// паузы). Он тоже переживает перезапуск: иначе висящий в чате ответ стал бы
+	// после рестарта неудаляемым и остался бы там навсегда.
+	ServiceMessageID int `json:"service_message_id,omitempty"`
 	// Состояние алерта: без него перезапуск посреди аварии присылал бы
 	// повторный алерт, а счётчик длительности начинался бы заново.
 	AlertActive    bool    `json:"alert_active,omitempty"`
@@ -142,7 +146,8 @@ func (s *telegramBotStore) botConfig() tgbot.Config {
 func (s *telegramBotStore) botState() tgbot.PersistedState {
 	c := s.get()
 	st := tgbot.PersistedState{
-		MessageID: c.StatusMessageID,
+		MessageID:        c.StatusMessageID,
+		ServiceMessageID: c.ServiceMessageID,
 		Incidents: tgbot.Incidents{
 			Availability: tgbot.AlertState{
 				Active:  c.AlertActive,
@@ -177,6 +182,7 @@ func (s *telegramBotStore) saveState(st tgbot.PersistedState) error {
 	s.mu.Lock()
 	cur := s.cur
 	cur.StatusMessageID = st.MessageID
+	cur.ServiceMessageID = st.ServiceMessageID
 	cur.AlertActive = st.Incidents.Availability.Active
 	cur.LastPercentage = st.Incidents.Availability.LastPct
 	cur.HasPercentage = st.Incidents.Availability.HasPct

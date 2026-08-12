@@ -197,10 +197,9 @@ func writeUplink(b *strings.Builder, v View) {
 		}
 	}
 	writeDCs(b, u.DCs)
-	writeLoad(b, u)
+	writeLoad(b, v, u)
 	if u.Version != "" {
-		fmt.Fprintf(b, "Движок: %s, работает %s\n", esc(u.Version),
-			duration(v.Now, v.Now.Add(-time.Duration(u.UptimeSeconds)*time.Second)))
+		fmt.Fprintf(b, "Движок: %s\n", esc(u.Version))
 	}
 	b.WriteString("Проверено: " + stampShort(u.CheckedAt) + "\n")
 }
@@ -208,69 +207,165 @@ func writeUplink(b *strings.Builder, v View) {
 // writeLoad — справка о нагрузке. На вердикт не влияет: «ошибочные» здесь про
 // клиентов (обрезанный ClientHello, таймаут рукопожатия), а не про связь с
 // дата-центрами, и на публичном прокси их доля всегда заметна.
-func writeLoad(b *strings.Builder, u *uplink.Status) {
+func writeLoad(b *strings.Builder, v View, u *uplink.Status) {
 	if u.Connections <= 0 && u.ActiveIPs <= 0 {
 		return
 	}
-	b.WriteString("\n")
 
+	var rows [][]string
+	add := func(label, value string) { rows = append(rows, []string{label, value}) }
+	if u.UptimeSeconds > 0 {
+		add("Время работы", duration(v.Now, v.Now.Add(-time.Duration(u.UptimeSeconds)*time.Second)))
+	}
 	if u.Connections > 0 {
-		fmt.Fprintf(b, "Соединений: %s", groupDigits(u.Connections))
+		add("Всего соединений", groupDigits(u.Connections))
+		bad := groupDigits(u.ConnectionsBad)
 		if u.ConnectionsBad > 0 {
-			fmt.Fprintf(b, " · с ошибкой %s (%.1f%%)",
-				groupDigits(u.ConnectionsBad),
-				float64(u.ConnectionsBad)/float64(u.Connections)*100)
+			bad += fmt.Sprintf(" (%.1f%%)", float64(u.ConnectionsBad)/float64(u.Connections)*100)
 		}
-		b.WriteString("\n")
-	}
-
-	var parts []string
-	if u.ActiveIPs > 0 {
-		parts = append(parts, fmt.Sprintf("активных IP %s", groupDigits(u.ActiveIPs)))
-	}
-	if u.TrafficOct > 0 {
-		parts = append(parts, "трафик "+humanBytes(u.TrafficOct))
+		add("Ошибочных", bad)
 	}
 	if u.Users > 0 {
-		parts = append(parts, fmt.Sprintf("пользователей %d", u.Users))
+		add("Пользователей", groupDigits(u.Users))
 	}
-	if len(parts) > 0 {
-		b.WriteString(strings.Join(parts, " · ") + "\n")
+	if u.ActiveIPs > 0 {
+		add("Активных IP", groupDigits(u.ActiveIPs))
+	}
+	if u.TrafficOct > 0 {
+		add("Трафик", humanBytes(u.TrafficOct))
 	}
 
-	if len(u.TopBadClasses) > 0 {
-		b.WriteString("\nОшибки соединений:\n")
-		b.WriteString(alignedCounts(u.TopBadClasses))
-	}
-	if u.HandshakeFails > 0 {
-		fmt.Fprintf(b, "Сбои рукопожатия: %s", groupDigits(u.HandshakeFails))
-		if len(u.TopHandshakeFails) > 0 {
-			var hs []string
-			for _, c := range u.TopHandshakeFails {
-				hs = append(hs, fmt.Sprintf("%s %s", esc(shorten(c.Class, 24)), groupDigits(c.Count)))
-			}
-			b.WriteString(" (" + strings.Join(hs, ", ") + ")")
-		}
-		b.WriteString("\n")
-	}
+	b.WriteString("\n")
+	b.WriteString(table("Нагрузка", nil, []bool{false, true}, rows))
+	b.WriteString("\n")
+
+	writeClasses(b, "Ошибки соединений", u.ConnectionsBad, u.BadClasses)
+	writeClasses(b, "Сбои рукопожатия", u.HandshakeFails, u.HandshakeClasses)
 }
 
-// alignedCounts печатает пары «класс — число» моноширинно: так столбец чисел
-// читается сверху вниз, а не выискивается в каждой строке.
-func alignedCounts(classes []uplink.ClassCount) string {
-	width := 0
-	for _, c := range classes {
-		if n := len([]rune(shorten(c.Class, 30))); n > width {
-			width = n
+// classLimit — сколько причин показываем. Остальные сворачиваются в строку
+// «прочие»: длинный хвост из единичных случаев вытеснил бы список зондов, а
+// сказать он способен только то, что уже сказано итогом.
+const classLimit = 6
+
+// classLabels — те же подписи, что панель показывает на дашборде
+// (frontend/src/components/ConnectionErrors.tsx). Копия небольшая и
+// осознанная: движок отдаёт машинные имена вроде tls_clienthello_truncated, и
+// без перевода бот говорил бы с человеком не на том языке, что панель.
+// Неизвестный класс печатается как есть — так же поступает и панель.
+var classLabels = map[string]string{
+	"timeout":                           "Таймаут",
+	"other":                             "Прочее",
+	"eof":                               "Преждевременный EOF",
+	"unknown_tls_sni":                   "Неизвестный TLS SNI",
+	"tls_clienthello_len_out_of_bounds": "Недопустимая длина TLS ClientHello",
+	"tls_clienthello_read_error":        "Ошибка чтения TLS ClientHello",
+	"tls_clienthello_truncated":         "Обрезанный TLS ClientHello",
+	"tls_handshake_bad_client":          "TLS handshake — bad client",
+	"tls_mtproto_bad_client":            "TLS MTProto — bad client",
+}
+
+func classLabel(class string) string {
+	if name, ok := classLabels[class]; ok {
+		return name
+	}
+	return class
+}
+
+// writeClasses печатает разбор по причинам.
+func writeClasses(b *strings.Builder, title string, total int64, classes []uplink.ClassCount) {
+	if len(classes) == 0 {
+		return
+	}
+	rows := make([][]string, 0, classLimit+1)
+	var shown int64
+	for i, c := range classes {
+		if i == classLimit && len(classes) > classLimit+1 {
+			rows = append(rows, []string{"прочие", groupDigits(total - shown)})
+			break
+		}
+		rows = append(rows, []string{shorten(classLabel(c.Class), 30), groupDigits(c.Count)})
+		shown += c.Count
+	}
+
+	label := title
+	if total > 0 {
+		label += " " + groupDigits(total)
+	}
+	b.WriteString(table(label, nil, []bool{false, true}, rows))
+	b.WriteString("\n")
+}
+
+// table собирает моноширинную таблицу: ширины колонок считаются по факту,
+// числовые колонки жмутся вправо, хвостовые пробелы срезаются.
+//
+// label уходит в class="language-…". Telegram подписывает этим кодовый блок,
+// и вместо безличного «копировать» в шапке видно, что в таблице. Документация
+// имя блока не оговаривает — там сказано только про язык программирования, —
+// поэтому расчёт скромный: не подхватится, останется прежнее «копировать».
+//
+// Содержимое ячеек экранируется здесь же: имена провайдеров вида «AT&T» иначе
+// ломают разметку, и Telegram отклоняет сообщение целиком.
+func table(label string, head []string, right []bool, rows [][]string) string {
+	if len(rows) == 0 {
+		return ""
+	}
+	cols := 0
+	for _, r := range rows {
+		cols = max(cols, len(r))
+	}
+	width := make([]int, cols)
+	measure := func(cells []string) {
+		for i, c := range cells {
+			if i < cols {
+				width[i] = max(width[i], len([]rune(c)))
+			}
 		}
 	}
-	var b strings.Builder
-	b.WriteString("<pre>")
-	for _, c := range classes {
-		name := shorten(c.Class, 30)
-		fmt.Fprintf(&b, "%-*s %s\n", width, esc(name), groupDigits(c.Count))
+	measure(head)
+	for _, r := range rows {
+		measure(r)
 	}
-	b.WriteString("</pre>\n")
+
+	var b strings.Builder
+	// Пробелы в подписи заменяются неразрывными: в HTML пробел делит атрибут
+	// class на несколько классов, и от подписи «Ошибки соединений» осталось бы
+	// одно слово. Неразрывный пробел разделителем не считается, а выглядит так
+	// же.
+	b.WriteString(`<pre><code class="language-` + esc(strings.ReplaceAll(label, " ", " ")) + `">`)
+
+	line := func(cells []string) {
+		var row strings.Builder
+		for i := range cols {
+			cell := ""
+			if i < len(cells) {
+				cell = cells[i]
+			}
+			pad := strings.Repeat(" ", width[i]-len([]rune(cell)))
+			if i < len(right) && right[i] {
+				row.WriteString(pad + esc(cell))
+			} else {
+				row.WriteString(esc(cell) + pad)
+			}
+			if i < cols-1 {
+				row.WriteString("  ")
+			}
+		}
+		b.WriteString(strings.TrimRight(row.String(), " ") + "\n")
+	}
+
+	if len(head) > 0 {
+		line(head)
+		total := 2 * (cols - 1)
+		for _, w := range width {
+			total += w
+		}
+		b.WriteString(strings.Repeat("─", total) + "\n")
+	}
+	for _, r := range rows {
+		line(r)
+	}
+	b.WriteString("</code></pre>")
 	return b.String()
 }
 
@@ -344,8 +439,8 @@ func writeDCs(b *strings.Builder, dcs []uplink.DCRtt) {
 	if len(dcs) == 0 {
 		return
 	}
-	b.WriteString("\n")
-	for i, dc := range dcs {
+	rows := make([][]string, 0, len(dcs))
+	for _, dc := range dcs {
 		mark := "✅"
 		if dc.AliveWriters == 0 {
 			mark = "⚪"
@@ -354,13 +449,22 @@ func writeDCs(b *strings.Builder, dcs []uplink.DCRtt) {
 		if dc.RTTEmaMs != nil {
 			rtt = fmt.Sprintf("%.0f мс", *dc.RTTEmaMs)
 		}
-		fmt.Fprintf(b, "%s DC %d: %s", mark, dc.DC, rtt)
-		if i%2 == 1 || i == len(dcs)-1 {
-			b.WriteString("\n")
-		} else {
-			b.WriteString("   ")
-		}
+		// Номер печатается как есть, включая отрицательные: движок делит так
+		// свою инфраструктуру, а придумывать расшифровку, которой нет ни в
+		// панели, ни в самом движке, — значит выдумывать.
+		rows = append(rows, []string{
+			fmt.Sprintf("%s DC %d", mark, dc.DC),
+			rtt,
+			fmt.Sprintf("%d / %d", dc.AliveWriters, dc.RequiredWriters),
+			fmt.Sprintf("%.0f%%", dc.CoveragePct),
+		})
 	}
+	b.WriteString("\n")
+	// Колонки — те же, что в панели: DC, RTT, писатели, покрытие.
+	b.WriteString(table("Дата-центры",
+		[]string{"   DC", "RTT", "Писатели", "Покрытие"},
+		[]bool{false, true, true, true}, rows))
+	b.WriteString("\n")
 }
 
 // clamp — последняя страховка от предела Telegram. Список зондов режется своей
@@ -384,8 +488,10 @@ func clamp(s string) string {
 // таблицы. Незакрытый <pre> Telegram не прощает: он отвечает 400 и сообщения
 // не будет вовсе — то есть вместо укороченного статуса не придёт никакого.
 func closePre(s string) string {
-	if strings.Count(s, "<pre>") > strings.Count(s, "</pre>") {
-		return s + "</pre>"
+	// Считаем по «<pre», а не по «<pre>»: блок открывается парой тегов
+	// (<pre><code class="…">), и закрывать его надо такой же парой.
+	if strings.Count(s, "<pre") > strings.Count(s, "</pre>") {
+		return s + "</code></pre>"
 	}
 	return s
 }
@@ -577,48 +683,38 @@ func writeProbes(b *strings.Builder, r *globalping.CheckResult) {
 		return
 	}
 
-	head := fmt.Sprintf("\n<b>Зонды (%d):</b>\n", len(r.Probes))
-	used := len([]rune(b.String())) + len([]rune(head))
-
 	cityW, netW := 0, 0
 	for _, p := range r.Probes {
-		if n := len([]rune(probeCity(p))); n > cityW {
-			cityW = n
-		}
-		if n := len([]rune(probeNet(p))); n > netW {
-			netW = n
-		}
+		cityW = max(cityW, len([]rune(probeCity(p))))
+		netW = max(netW, len([]rune(probeNet(p))))
 	}
 	cityW, netW = min(cityW, 16), min(netW, 18)
 
-	reasons := groupReasons(r.Probes)
-	tail := renderReasons(reasons)
-	budget := MessageLimit - used - len([]rune(tail)) - len([]rune("<pre></pre>")) - 24
+	tail := renderReasons(groupReasons(r.Probes))
+	// Запас в 24 знака — на служебную разметку блока и строку «…и ещё N».
+	budget := MessageLimit - len([]rune(b.String())) - len([]rune(tail)) - 24
 
-	var rows strings.Builder
-	shown := 0
+	rows := make([][]string, 0, len(r.Probes))
+	used := 0
 	for _, p := range r.Probes {
 		mark := "✅"
 		if !p.TLSSuccess {
 			mark = "❌"
 		}
-		row := strings.TrimRight(fmt.Sprintf("%s %-*s  %s",
-			mark, cityW, esc(shorten(probeCity(p), cityW)), esc(shorten(probeNet(p), netW))), " ") + "\n"
-		if len([]rune(rows.String()))+len([]rune(row)) > budget {
+		city, net := shorten(probeCity(p), cityW), shorten(probeNet(p), netW)
+		used += len([]rune(mark)) + len([]rune(city)) + len([]rune(net)) + 4
+		if used > budget {
 			break
 		}
-		rows.WriteString(row)
-		shown++
+		rows = append(rows, []string{mark + " " + city, net})
 	}
 
-	b.WriteString(head)
-	b.WriteString("<pre>")
-	fmt.Fprintf(b, "   %-*s  %s\n", cityW, "Город", "Провайдер")
-	b.WriteString(strings.Repeat("─", cityW+netW+6) + "\n")
-	b.WriteString(rows.String())
-	b.WriteString("</pre>")
-	if shown < len(r.Probes) {
-		fmt.Fprintf(b, "…и ещё %d зондов\n", len(r.Probes)-shown)
+	b.WriteString("\n")
+	b.WriteString(table(fmt.Sprintf("Зонды (%d)", len(r.Probes)),
+		[]string{"   Город", "Провайдер"}, nil, rows))
+	b.WriteString("\n")
+	if len(rows) < len(r.Probes) {
+		fmt.Fprintf(b, "…и ещё %d зондов\n", len(r.Probes)-len(rows))
 	}
 	b.WriteString(tail)
 }

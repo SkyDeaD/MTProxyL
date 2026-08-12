@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"reflect"
 	"strings"
 	"time"
 )
@@ -66,9 +67,56 @@ func NewClient(baseURL, authHeader string) *Client {
 // сбой, второе — как «не применимо». Смешать их значит объявить «middle proxy
 // отключили» при обычном обрыве связи с движком.
 func (c *Client) get(ctx context.Context, endpoint string, out any) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+endpoint, nil)
+	data, err := c.fetch(ctx, endpoint)
 	if err != nil {
 		return err
+	}
+	if out == nil {
+		return nil
+	}
+	if err := json.Unmarshal(data, out); err != nil {
+		return fmt.Errorf("%s: разбор данных: %w", endpoint, err)
+	}
+	return nil
+}
+
+// getLenient разбирает ответ поле за полем и возвращает имена тех, что не
+// поддались. Нужен там, где ценность ответа не в одном конкретном поле, а в
+// наборе чисел: обычный json.Unmarshal при первой же нестыковке типов
+// выбрасывает ВЕСЬ объект, и вместо «одно число потерялось» получается «нет
+// ни одного». Именно так пропала вся статистика движка, и заметить это было
+// неоткуда — ошибка нигде не показывалась.
+func (c *Client) getLenient(ctx context.Context, endpoint string, out any) ([]string, error) {
+	data, err := c.fetch(ctx, endpoint)
+	if err != nil {
+		return nil, err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return nil, fmt.Errorf("%s: разбор данных: %w", endpoint, err)
+	}
+
+	v := reflect.ValueOf(out).Elem()
+	t := v.Type()
+	var skipped []string
+	for i := range t.NumField() {
+		name, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ",")
+		raw, ok := fields[name]
+		if name == "" || name == "-" || !ok || string(raw) == "null" {
+			continue
+		}
+		if err := json.Unmarshal(raw, v.Field(i).Addr().Interface()); err != nil {
+			skipped = append(skipped, name)
+		}
+	}
+	return skipped, nil
+}
+
+// fetch — общая часть: запрос, конверт telemt и содержимое data.
+func (c *Client) fetch(ctx context.Context, endpoint string) (json.RawMessage, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+endpoint, nil)
+	if err != nil {
+		return nil, err
 	}
 	req.Header.Set("Accept", "application/json")
 	if c.authHeader != "" {
@@ -80,13 +128,13 @@ func (c *Client) get(ctx context.Context, endpoint string, out any) error {
 		// Самая частая причина — движок перезапускается: несколько секунд он
 		// не отвечает. Формулировка та же, что в ws-обработчике, чтобы панель
 		// и бот объясняли одно и то же одинаково.
-		return fmt.Errorf("движок telemt не отвечает: %w", err)
+		return nil, fmt.Errorf("движок telemt не отвечает: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if err != nil {
-		return fmt.Errorf("%s: чтение ответа: %w", endpoint, err)
+		return nil, fmt.Errorf("%s: чтение ответа: %w", endpoint, err)
 	}
 
 	var envelope struct {
@@ -98,25 +146,19 @@ func (c *Client) get(ctx context.Context, endpoint string, out any) error {
 		} `json:"error"`
 	}
 	if err := json.Unmarshal(body, &envelope); err != nil {
-		return &APIError{Endpoint: endpoint, Status: resp.StatusCode, Message: "ответ не разобран"}
+		return nil, &APIError{Endpoint: endpoint, Status: resp.StatusCode, Message: "ответ не разобран"}
 	}
 	if !envelope.OK {
 		apiErr := &APIError{Endpoint: endpoint, Status: resp.StatusCode}
 		if envelope.Err != nil {
 			apiErr.Code, apiErr.Message = envelope.Err.Code, envelope.Err.Message
 		}
-		return apiErr
-	}
-	if out == nil {
-		return nil
+		return nil, apiErr
 	}
 	if len(envelope.Data) == 0 {
-		return &APIError{Endpoint: endpoint, Status: resp.StatusCode, Message: "пустой ответ"}
+		return nil, &APIError{Endpoint: endpoint, Status: resp.StatusCode, Message: "пустой ответ"}
 	}
-	if err := json.Unmarshal(envelope.Data, out); err != nil {
-		return fmt.Errorf("%s: разбор данных: %w", endpoint, err)
-	}
-	return nil
+	return envelope.Data, nil
 }
 
 func (c *Client) MeQuality(ctx context.Context) (*MeQuality, error) {
@@ -143,20 +185,26 @@ func (c *Client) Health(ctx context.Context) (*Health, error) {
 	return &out, nil
 }
 
-func (c *Client) SystemInfo(ctx context.Context) (*SystemInfo, error) {
+// SystemInfo и Summary разбираются щадяще: это наборы независимых чисел, и
+// потерять из-за одного неудачного поля весь набор — цена несоразмерная.
+// Имена непонятых полей возвращаются вторым значением, чтобы наблюдатель мог
+// сказать о них вслух: молчание здесь уже однажды стоило всей статистики.
+func (c *Client) SystemInfo(ctx context.Context) (*SystemInfo, []string, error) {
 	var out SystemInfo
-	if err := c.get(ctx, "/v1/system/info", &out); err != nil {
-		return nil, err
+	skipped, err := c.getLenient(ctx, "/v1/system/info", &out)
+	if err != nil {
+		return nil, nil, err
 	}
-	return &out, nil
+	return &out, skipped, nil
 }
 
-func (c *Client) Summary(ctx context.Context) (*Summary, error) {
+func (c *Client) Summary(ctx context.Context) (*Summary, []string, error) {
 	var out Summary
-	if err := c.get(ctx, "/v1/stats/summary", &out); err != nil {
-		return nil, err
+	skipped, err := c.getLenient(ctx, "/v1/stats/summary", &out)
+	if err != nil {
+		return nil, nil, err
 	}
-	return &out, nil
+	return &out, skipped, nil
 }
 
 func (c *Client) Users(ctx context.Context) ([]User, error) {

@@ -11,6 +11,8 @@
 // браузера (см. internal/ws/handler.go) — для оповещений это не годится.
 package uplink
 
+import "encoding/json"
+
 // Ответы telemt приходят в общем конверте {ok, data, error{code,message}}.
 // Структуры ниже описывают то, что лежит внутри data, и портированы из
 // frontend/src/types/runtime.ts: в Go этих типов до сих пор не было — панель
@@ -74,16 +76,45 @@ type Health struct {
 // ловится по её смене, а не по падению uptime_seconds: абсолютное значение не
 // требует арифметики дельт, не врёт при пропущенных опросах и устойчивее к
 // сдвигу системных часов.
+// Числовые поля объявлены как float64 намеренно. Движок волен отдать секунды
+// дробными («83220.47»), и для int64 это ошибка типа — а она в encoding/json
+// роняет разбор ВСЕЙ структуры, а не одного поля. Ровно так и пропала вся
+// статистика на боевом сервере: сводка и системная информация выбрасывались
+// целиком, и заодно молча умерло оповещение о перезапуске движка.
 type SystemInfo struct {
-	Version          string `json:"version"`
-	ProcessStartedAt int64  `json:"process_started_at_epoch_secs"`
-	UptimeSeconds    int64  `json:"uptime_seconds"`
+	Version          string  `json:"version"`
+	ProcessStartedAt float64 `json:"process_started_at_epoch_secs"`
+	UptimeSeconds    float64 `json:"uptime_seconds"`
 }
 
 // ClassCount — счётчик ошибок одного класса из сводки движка.
+//
+// Имя поля со счётчиком читается вручную, потому что движок называет его
+// «total» (так его читает панель — ConnectionErrors.tsx), а мы изначально
+// ждали «count». Принимаем оба: сборки движка разных лет в поле не сойдутся,
+// а молчаливые нули вместо чисел никто не заметит.
 type ClassCount struct {
-	Class string `json:"class"`
-	Count int64  `json:"count"`
+	Class string
+	Count int64
+}
+
+func (c *ClassCount) UnmarshalJSON(b []byte) error {
+	var raw struct {
+		Class string   `json:"class"`
+		Total *float64 `json:"total"`
+		Count *float64 `json:"count"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	c.Class = raw.Class
+	switch {
+	case raw.Total != nil:
+		c.Count = int64(*raw.Total)
+	case raw.Count != nil:
+		c.Count = int64(*raw.Count)
+	}
+	return nil
 }
 
 // Summary — сводка движка из /v1/stats/summary: та же, что панель показывает
@@ -92,11 +123,11 @@ type ClassCount struct {
 // Раз телеметрию и так опрашиваем раз в минуту, эти числа достаются даром, а
 // человеку они говорят о нагрузке и о том, чем именно отваливаются клиенты.
 type Summary struct {
-	UptimeSeconds          int64        `json:"uptime_seconds"`
-	ConnectionsTotal       int64        `json:"connections_total"`
-	ConnectionsBadTotal    int64        `json:"connections_bad_total"`
-	HandshakeTimeoutsTotal int64        `json:"handshake_timeouts_total"`
-	ConfiguredUsers        int64        `json:"configured_users"`
+	UptimeSeconds          float64      `json:"uptime_seconds"`
+	ConnectionsTotal       float64      `json:"connections_total"`
+	ConnectionsBadTotal    float64      `json:"connections_bad_total"`
+	HandshakeTimeoutsTotal float64      `json:"handshake_timeouts_total"`
+	ConfiguredUsers        float64      `json:"configured_users"`
 	ConnectionsBadByClass  []ClassCount `json:"connections_bad_by_class"`
 	HandshakeFailsByClass  []ClassCount `json:"handshake_failures_by_class"`
 }
