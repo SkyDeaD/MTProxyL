@@ -102,6 +102,14 @@ type Status struct {
 	Connections    int64
 	ConnectionsBad int64
 	TopBadClasses  []ClassCount
+	// Сбои рукопожатия — отдельный блок в панели, отдельная строка и здесь.
+	HandshakeFails    int64
+	TopHandshakeFails []ClassCount
+	// Активные адреса и суммарный трафик — сумма по списку пользователей.
+	ActiveIPs  int64
+	TrafficOct int64
+	Users      int64
+	UptimeSecs int64
 
 	// ── Итог ─────────────────────────────────────────────────────────────
 	Level Level

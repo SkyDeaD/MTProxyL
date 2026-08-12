@@ -98,4 +98,12 @@ type Summary struct {
 	HandshakeTimeoutsTotal int64        `json:"handshake_timeouts_total"`
 	ConfiguredUsers        int64        `json:"configured_users"`
 	ConnectionsBadByClass  []ClassCount `json:"connections_bad_by_class"`
+	HandshakeFailsByClass  []ClassCount `json:"handshake_failures_by_class"`
+}
+
+// User — то, что нужно из /v1/users. Активные адреса и трафик панель считает
+// суммой по этому списку (см. DashboardPage.tsx), другого источника нет.
+type User struct {
+	ActiveUniqueIPs int64 `json:"active_unique_ips"`
+	TotalOctets     int64 `json:"total_octets"`
 }

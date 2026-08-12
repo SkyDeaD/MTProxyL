@@ -664,6 +664,8 @@ export interface TelegramBotStatus {
   alert_threshold: number;
   /** Порог доли неудачных подключений к дата-центрам Telegram, %. */
   connect_fail_threshold: number;
+  /** Часовой пояс для времени в сообщениях; пусто — определять самому. */
+  timezone: string;
   /** Последний вердикт наблюдения за исходящей связью; нет — наблюдение молчит. */
   uplink?: TelegramUplinkStatus | null;
   running?: boolean;
@@ -697,6 +699,7 @@ export interface TelegramBotPatch {
   admin_id?: number;
   alert_threshold?: number;
   connect_fail_threshold?: number;
+  timezone?: string;
 }
 
 const TELEGRAM_BASE = `${BASE}/api/telegram`;
