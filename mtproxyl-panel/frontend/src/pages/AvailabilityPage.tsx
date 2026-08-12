@@ -354,6 +354,7 @@ function TelegramBotForm() {
   const [adminId, setAdminId] = useState('');
   const [threshold, setThreshold] = useState('');
   const [failThreshold, setFailThreshold] = useState('');
+  const [timezone, setTimezone] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -364,6 +365,7 @@ function TelegramBotForm() {
     setAdminId(s.admin_id ? String(s.admin_id) : '');
     setThreshold(s.alert_threshold ? String(s.alert_threshold) : '');
     setFailThreshold(s.connect_fail_threshold ? String(s.connect_fail_threshold) : '');
+    setTimezone(s.timezone ?? '');
   }, []);
 
   useEffect(() => {
@@ -416,6 +418,11 @@ function TelegramBotForm() {
         return;
       }
       patch.connect_fail_threshold = value;
+    }
+
+    // Пустая строка — осознанное «определять самому», поэтому шлём её тоже.
+    if (timezone.trim() !== (status?.timezone ?? '')) {
+      patch.timezone = timezone.trim();
     }
 
     if (Object.keys(patch).length === 0) {
@@ -540,6 +547,21 @@ function TelegramBotForm() {
             % — доля отказов без повтора при подключении к дата-центрам, выше которой приходит
             алерт. Обычные неудачные попытки сюда не входят: движок штатно пробует несколько
             маршрутов и берёт первый ответивший
+          </span>
+        </div>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          <label className="text-xs text-text-secondary w-28 shrink-0">Часовой пояс</label>
+          <Input
+            value={timezone}
+            onChange={(e) => setTimezone(e.target.value)}
+            placeholder="определять самому"
+            spellCheck={false}
+            className="max-w-[220px]"
+          />
+          <span className="text-xs text-text-secondary">
+            например <code className="bg-surface-hover px-1 rounded">Asia/Tashkent</code>. Пусто —
+            брать зону сервера; в контейнере она своя, и тогда пояс задают здесь
           </span>
         </div>
 

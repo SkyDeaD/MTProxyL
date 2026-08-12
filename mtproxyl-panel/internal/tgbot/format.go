@@ -133,20 +133,24 @@ func RenderStatus(v View) string {
 	}
 
 	r := v.Result
-	fmt.Fprintf(&b, "%s <b>Доступность из РФ — %.0f%%</b>\n\n", levelDot(r.Level), r.Percentage)
-	fmt.Fprintf(&b, "Зондов: <b>%d / %d</b>\n", r.SuccessProbes, r.TotalProbes)
+	fmt.Fprintf(&b, "%s <b>Доступность из РФ — %.0f%%</b>\n", levelDot(r.Level), r.Percentage)
+	fmt.Fprintf(&b, "%d из %d зондов", r.SuccessProbes, r.TotalProbes)
+	if ago := duration(v.Now, r.CheckedAt); ago != "" {
+		b.WriteString(" · " + ago + " назад")
+	}
+	b.WriteString("\n\n")
 
 	writeTarget(&b, v)
 	b.WriteString("Проверено: " + stamp(r.CheckedAt) + "\n")
 	writeFooter(&b, v)
 
 	writeUplink(&b, v)
-	writeZone(&b, v)
 	// Зонды — последними: их обрезка считает уже занятое место, поэтому блок
 	// связи, поставленный сюда, влезает всегда, а ужимается список зондов. Если
 	// поменять местами, при полусотне зондов блок связи просто не поместится —
 	// то есть пропадёт ровно тогда, когда он нужнее всего.
 	writeProbes(&b, r)
+	writeZone(&b, v)
 	return clamp(b.String())
 }
 
@@ -201,32 +205,102 @@ func writeUplink(b *strings.Builder, v View) {
 	b.WriteString("Проверено: " + stampShort(u.CheckedAt) + "\n")
 }
 
-// writeLoad — справка о нагрузке: сколько соединений обслужено и сколько из
-// них сорвалось. На вердикт не влияет: «ошибочные» здесь про клиентов
-// (обрезанный ClientHello, таймаут рукопожатия), а не про связь с
-// дата-центрами, и на публичном прокси их всегда заметная доля.
+// writeLoad — справка о нагрузке. На вердикт не влияет: «ошибочные» здесь про
+// клиентов (обрезанный ClientHello, таймаут рукопожатия), а не про связь с
+// дата-центрами, и на публичном прокси их доля всегда заметна.
 func writeLoad(b *strings.Builder, u *uplink.Status) {
-	if u.Connections <= 0 {
+	if u.Connections <= 0 && u.ActiveIPs <= 0 {
 		return
 	}
-	fmt.Fprintf(b, "\nСоединений: %s", groupDigits(u.Connections))
-	if u.ConnectionsBad > 0 {
-		fmt.Fprintf(b, ", из них с ошибкой %s (%.0f%%)",
-			groupDigits(u.ConnectionsBad),
-			float64(u.ConnectionsBad)/float64(u.Connections)*100)
-	}
 	b.WriteString("\n")
-	for _, c := range u.TopBadClasses {
-		if c.Count > 0 && c.Class != "" {
-			fmt.Fprintf(b, "  %s — %s\n", esc(c.Class), groupDigits(c.Count))
+
+	if u.Connections > 0 {
+		fmt.Fprintf(b, "Соединений: %s", groupDigits(u.Connections))
+		if u.ConnectionsBad > 0 {
+			fmt.Fprintf(b, " · с ошибкой %s (%.1f%%)",
+				groupDigits(u.ConnectionsBad),
+				float64(u.ConnectionsBad)/float64(u.Connections)*100)
+		}
+		b.WriteString("\n")
+	}
+
+	var parts []string
+	if u.ActiveIPs > 0 {
+		parts = append(parts, fmt.Sprintf("активных IP %s", groupDigits(u.ActiveIPs)))
+	}
+	if u.TrafficOct > 0 {
+		parts = append(parts, "трафик "+humanBytes(u.TrafficOct))
+	}
+	if u.Users > 0 {
+		parts = append(parts, fmt.Sprintf("пользователей %d", u.Users))
+	}
+	if len(parts) > 0 {
+		b.WriteString(strings.Join(parts, " · ") + "\n")
+	}
+
+	if len(u.TopBadClasses) > 0 {
+		b.WriteString("\nОшибки соединений:\n")
+		b.WriteString(alignedCounts(u.TopBadClasses))
+	}
+	if u.HandshakeFails > 0 {
+		fmt.Fprintf(b, "Сбои рукопожатия: %s", groupDigits(u.HandshakeFails))
+		if len(u.TopHandshakeFails) > 0 {
+			var hs []string
+			for _, c := range u.TopHandshakeFails {
+				hs = append(hs, fmt.Sprintf("%s %s", esc(shorten(c.Class, 24)), groupDigits(c.Count)))
+			}
+			b.WriteString(" (" + strings.Join(hs, ", ") + ")")
+		}
+		b.WriteString("\n")
+	}
+}
+
+// alignedCounts печатает пары «класс — число» моноширинно: так столбец чисел
+// читается сверху вниз, а не выискивается в каждой строке.
+func alignedCounts(classes []uplink.ClassCount) string {
+	width := 0
+	for _, c := range classes {
+		if n := len([]rune(shorten(c.Class, 30))); n > width {
+			width = n
 		}
 	}
+	var b strings.Builder
+	b.WriteString("<pre>")
+	for _, c := range classes {
+		name := shorten(c.Class, 30)
+		fmt.Fprintf(&b, "%-*s %s\n", width, esc(name), groupDigits(c.Count))
+	}
+	b.WriteString("</pre>\n")
+	return b.String()
+}
+
+// humanBytes — трафик в привычном виде, как на дашборде панели.
+func humanBytes(n int64) string {
+	const unit = 1024
+	if n < unit {
+		return fmt.Sprintf("%d Б", n)
+	}
+	div, exp := int64(unit), 0
+	for v := n / unit; v >= unit && exp < 4; v /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %s", float64(n)/float64(div), [...]string{"КБ", "МБ", "ГБ", "ТБ", "ПБ"}[exp])
+}
+
+// shorten обрезает длинное имя многоточием, чтобы колонки не разъезжались.
+func shorten(s string, max int) string {
+	r := []rune(strings.TrimSpace(s))
+	if len(r) <= max {
+		return string(r)
+	}
+	return string(r[:max-1]) + "…"
 }
 
 // groupDigits разделяет тысячи узкими пробелами: 15198 читается плохо.
 func groupDigits(n int64) string {
 	s := fmt.Sprintf("%d", n)
-	if len(s) <= 4 {
+	if len(s) <= 3 {
 		return s
 	}
 	var out []byte
@@ -297,13 +371,23 @@ func writeDCs(b *strings.Builder, dcs []uplink.DCRtt) {
 func clamp(s string) string {
 	runes := []rune(s)
 	if len(runes) <= MessageLimit {
-		return s
+		return closePre(s)
 	}
-	cut := string(runes[:MessageLimit-1])
+	cut := string(runes[:MessageLimit-len("…</pre>")])
 	if i := strings.LastIndexByte(cut, '\n'); i > 0 {
 		cut = cut[:i+1]
 	}
-	return cut + "…"
+	return closePre(cut + "…")
+}
+
+// closePre дописывает закрывающий тег, если обрезка пришлась на середину
+// таблицы. Незакрытый <pre> Telegram не прощает: он отвечает 400 и сообщения
+// не будет вовсе — то есть вместо укороченного статуса не придёт никакого.
+func closePre(s string) string {
+	if strings.Count(s, "<pre>") > strings.Count(s, "</pre>") {
+		return s + "</pre>"
+	}
+	return s
 }
 
 // writeBanners печатает шапки событий. Порядок — по важности: упавший движок
@@ -480,63 +564,120 @@ func writeZone(b *strings.Builder, v View) {
 	}
 }
 
-// writeProbes выкладывает все зонды и обрезает хвост, если сообщение упирается
-// в предел Telegram. Резать приходится по-настоящему: имена провайдеров бывают
-// длиной в половину строки, а зондов до пятидесяти.
+// writeProbes рисует таблицу зондов моноширинно: город и провайдер выровнены
+// в колонки, чтобы взгляд шёл по столбцу, а не выискивал названия в строках.
+// Причины отказов не повторяются у каждой строки — они собраны сводкой ниже.
+//
+// Таблица идёт последней и рисуется в остаток бюджета сообщения. Это важно:
+// она внутри <pre>, и если бы её обрезал общий clamp, закрывающий тег потерялся
+// бы, а Telegram отклонил бы сообщение целиком — то есть статуса не было бы
+// вовсе.
 func writeProbes(b *strings.Builder, r *globalping.CheckResult) {
 	if len(r.Probes) == 0 {
 		return
 	}
-	fmt.Fprintf(b, "\n<b>Зонды (%d):</b>\n", len(r.Probes))
 
-	head := b.String()
-	lines := make([]string, 0, len(r.Probes))
+	head := fmt.Sprintf("\n<b>Зонды (%d):</b>\n", len(r.Probes))
+	used := len([]rune(b.String())) + len([]rune(head))
+
+	cityW, netW := 0, 0
 	for _, p := range r.Probes {
-		lines = append(lines, probeLine(p))
+		if n := len([]rune(probeCity(p))); n > cityW {
+			cityW = n
+		}
+		if n := len([]rune(probeNet(p))); n > netW {
+			netW = n
+		}
+	}
+	cityW, netW = min(cityW, 16), min(netW, 18)
+
+	reasons := groupReasons(r.Probes)
+	tail := renderReasons(reasons)
+	budget := MessageLimit - used - len([]rune(tail)) - len([]rune("<pre></pre>")) - 24
+
+	var rows strings.Builder
+	shown := 0
+	for _, p := range r.Probes {
+		mark := "✅"
+		if !p.TLSSuccess {
+			mark = "❌"
+		}
+		row := strings.TrimRight(fmt.Sprintf("%s %-*s  %s",
+			mark, cityW, esc(shorten(probeCity(p), cityW)), esc(shorten(probeNet(p), netW))), " ") + "\n"
+		if len([]rune(rows.String()))+len([]rune(row)) > budget {
+			break
+		}
+		rows.WriteString(row)
+		shown++
 	}
 
-	used := len([]rune(head))
-	for i, line := range lines {
-		rest := len(lines) - i
-		tail := fmt.Sprintf("…и ещё %d зондов\n", rest)
-		// Строка влезет только если после неё останется место на хвост про
-		// оставшиеся — иначе обрежемся прямо сейчас и честно скажем сколько.
-		if used+len([]rune(line))+len([]rune(tail)) > MessageLimit {
-			b.WriteString(tail)
-			return
-		}
-		b.WriteString(line)
-		used += len([]rune(line))
+	b.WriteString(head)
+	b.WriteString("<pre>")
+	fmt.Fprintf(b, "   %-*s  %s\n", cityW, "Город", "Провайдер")
+	b.WriteString(strings.Repeat("─", cityW+netW+6) + "\n")
+	b.WriteString(rows.String())
+	b.WriteString("</pre>")
+	if shown < len(r.Probes) {
+		fmt.Fprintf(b, "…и ещё %d зондов\n", len(r.Probes)-shown)
 	}
+	b.WriteString(tail)
 }
 
-func probeLine(p globalping.ProbeDetail) string {
-	mark := "❌"
-	if p.TLSSuccess {
-		mark = "✅"
+// groupReasons сводит причины отказов в список с количеством: одна и та же
+// формулировка у пяти зондов — это одна строка, а не пять.
+func groupReasons(probes []globalping.ProbeDetail) []uplink.ClassCount {
+	counts := map[string]int64{}
+	var order []string
+	for _, p := range probes {
+		if p.TLSSuccess {
+			continue
+		}
+		reason := oneLine(p.Error)
+		if reason == "" {
+			reason = "причина не указана"
+		}
+		if _, seen := counts[reason]; !seen {
+			order = append(order, reason)
+		}
+		counts[reason]++
 	}
+	out := make([]uplink.ClassCount, 0, len(order))
+	for _, r := range order {
+		out = append(out, uplink.ClassCount{Class: r, Count: counts[r]})
+	}
+	return out
+}
 
-	place := p.City
-	if place == "" {
-		place = p.Country
+func renderReasons(reasons []uplink.ClassCount) string {
+	if len(reasons) == 0 {
+		return ""
 	}
-	if place == "" {
-		place = "зонд"
+	var b strings.Builder
+	b.WriteString("\n<b>Почему не дошли:</b>\n")
+	for _, r := range reasons {
+		fmt.Fprintf(&b, "  • %s — %d\n", esc(shorten(r.Class, 46)), r.Count)
 	}
+	return b.String()
+}
 
-	provider := p.Network
-	if provider == "" && p.ASN > 0 {
-		provider = fmt.Sprintf("AS%d", p.ASN)
+func probeCity(p globalping.ProbeDetail) string {
+	if p.City != "" {
+		return p.City
 	}
+	if p.Country != "" {
+		return p.Country
+	}
+	return "зонд"
+}
 
-	line := mark + " " + esc(place)
-	if provider != "" {
-		line += " · " + esc(provider)
+func probeNet(p globalping.ProbeDetail) string {
+	if p.Network != "" {
+		return p.Network
 	}
-	if !p.TLSSuccess && p.Error != "" {
-		line += " — " + esc(oneLine(p.Error))
+	if p.ASN > 0 {
+		return fmt.Sprintf("AS%d", p.ASN)
 	}
-	return line + "\n"
+	return "—"
 }
 
 // RenderStartReply — ответ на /start. Человеку нужен его chat_id, чтобы
@@ -641,7 +782,13 @@ func zoneNote(t time.Time) string {
 	if t.IsZero() {
 		return ""
 	}
-	name, offset := t.In(localZone()).Zone()
+	loc := localZone()
+	name, offset := t.In(loc).Zone()
+	// У многих зон Zone() возвращает «+05», а человеку полезнее «Asia/Tashkent»
+	// — это то, что он вводил в панели или видит в timedatectl.
+	if n := loc.String(); n != "" && n != "Local" && strings.Contains(n, "/") {
+		name = n
+	}
 	sign, hours, mins := "+", offset/3600, (offset%3600)/60
 	if offset < 0 {
 		sign, hours, mins = "-", -hours, -mins

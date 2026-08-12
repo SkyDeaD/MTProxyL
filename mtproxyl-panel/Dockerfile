@@ -20,7 +20,10 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -ldflags="-s -w -X ma
 
 # Stage 3: Minimal runtime (static binary — no libc dependency)
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+# tzdata — чтобы время в контейнере было местным, а не UTC. Сама панель зоны
+# носит в себе (см. импорт time/tzdata), но всё остальное в образе смотрит на
+# диск.
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tzdata && rm -rf /var/lib/apt/lists/*
 COPY --from=backend /app/mtproxyl-panel /usr/local/bin/
 EXPOSE 8080
 ENTRYPOINT ["mtproxyl-panel"]

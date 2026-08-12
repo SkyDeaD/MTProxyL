@@ -20,7 +20,12 @@ var (
 	tzMu      sync.Mutex
 	tzCached  *time.Location
 	tzCheckAt time.Time
-	tzNow     = time.Now // подменяется в тестах
+	// tzOverride — зона, заданная оператором в панели. Пустая строка значит
+	// «определять самому». Нужна из-за контейнера: панель в Docker видит зону
+	// контейнера, а не хоста, и автоопределение там принципиально не может
+	// дать нужный ответ.
+	tzOverride string
+	tzNow      = time.Now // подменяется в тестах
 	// tzSources — где смотреть имя зоны. Порядок важен: переменная окружения
 	// перекрывает системную настройку, как и для всего остального в Go.
 	tzEnv       = os.Getenv
@@ -29,8 +34,27 @@ var (
 	tzLocalHint = "/etc/localtime"
 )
 
-// localZone возвращает текущий часовой пояс системы, перечитывая его не чаще
-// раза в tzRecheck.
+// SetTimezone задаёт зону, выбранную оператором. Пустая строка возвращает
+// автоопределение.
+func SetTimezone(name string) {
+	tzMu.Lock()
+	tzOverride = strings.TrimSpace(name)
+	tzCached, tzCheckAt = nil, time.Time{}
+	tzMu.Unlock()
+}
+
+// ValidTimezone проверяет имя зоны, чтобы опечатка не превратилась молча в UTC.
+func ValidTimezone(name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return true // пусто — это «определять самому», тоже допустимо
+	}
+	_, err := tzLoad(name)
+	return err == nil
+}
+
+// localZone возвращает текущий часовой пояс, перечитывая его не чаще раза в
+// tzRecheck.
 func localZone() *time.Location {
 	tzMu.Lock()
 	defer tzMu.Unlock()
@@ -50,7 +74,14 @@ func localZone() *time.Location {
 	return tzCached
 }
 
+// loadZone. Порядок: заданное оператором, потом TZ, потом система.
+// Вызывается под tzMu.
 func loadZone() *time.Location {
+	if tzOverride != "" {
+		if loc, err := tzLoad(tzOverride); err == nil {
+			return loc
+		}
+	}
 	if name := strings.TrimSpace(tzEnv("TZ")); name != "" {
 		if loc, err := tzLoad(name); err == nil {
 			return loc
@@ -73,6 +104,6 @@ func loadZone() *time.Location {
 // resetZoneCache нужен тестам: между случаями кэш не должен протекать.
 func resetZoneCache() {
 	tzMu.Lock()
-	tzCached, tzCheckAt = nil, time.Time{}
+	tzCached, tzCheckAt, tzOverride = nil, time.Time{}, ""
 	tzMu.Unlock()
 }

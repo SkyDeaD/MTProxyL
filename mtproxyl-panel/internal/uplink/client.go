@@ -158,3 +158,11 @@ func (c *Client) Summary(ctx context.Context) (*Summary, error) {
 	}
 	return &out, nil
 }
+
+func (c *Client) Users(ctx context.Context) ([]User, error) {
+	var out []User
+	if err := c.get(ctx, "/v1/users", &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}

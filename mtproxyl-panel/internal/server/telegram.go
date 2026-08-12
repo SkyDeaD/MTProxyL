@@ -70,6 +70,11 @@ type TelegramBotConfig struct {
 	// дата-центрам, выше которой поднимается тревога. Имя поля осталось прежним
 	// ради совместимости с уже записанными файлами настроек.
 	ConnectFailThreshold *float64 `json:"connect_fail_threshold,omitempty"`
+
+	// Timezone — часовой пояс для времени в сообщениях. Пусто — определять
+	// самому. Нужен из-за контейнера: панель в Docker видит зону контейнера, а
+	// не хоста, и автоопределение там принципиально не может дать нужный ответ.
+	Timezone *string `json:"timezone,omitempty"`
 }
 
 // telegramBotStore хранит настройки бота на диске рядом с остальным, что
@@ -217,6 +222,9 @@ func (s *telegramBotStore) setConfig(patch TelegramBotConfig) error {
 	if patch.ConnectFailThreshold != nil {
 		cur.ConnectFailThreshold = patch.ConnectFailThreshold
 	}
+	if patch.Timezone != nil {
+		cur.Timezone = patch.Timezone
+	}
 	s.cur = cur
 	s.mu.Unlock()
 	return s.write(cur)
@@ -253,6 +261,15 @@ func (s *telegramBotStore) connectFailThreshold() float64 {
 	return uplink.DefaultFailRateThreshold
 }
 
+// timezone — выбранный оператором пояс; пусто значит «определять самому».
+func (s *telegramBotStore) timezone() string {
+	c := s.get()
+	if c.Timezone == nil {
+		return ""
+	}
+	return *c.Timezone
+}
+
 func (s *telegramBotStore) hasToken() bool {
 	c := s.get()
 	return c.Token != nil && *c.Token != ""
@@ -281,6 +298,7 @@ func (s *Server) registerTelegramRoutes(mux *http.ServeMux, jwtSecret []byte) {
 			AdminID              *int64   `json:"admin_id"`
 			AlertThreshold       *float64 `json:"alert_threshold"`
 			ConnectFailThreshold *float64 `json:"connect_fail_threshold"`
+			Timezone             *string  `json:"timezone"`
 		}
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&body); err != nil {
 			writeError(w, http.StatusBadRequest, "bad_request", "Не удалось разобрать запрос")
@@ -292,6 +310,17 @@ func (s *Server) registerTelegramRoutes(mux *http.ServeMux, jwtSecret []byte) {
 			AdminID:              body.AdminID,
 			AlertThreshold:       body.AlertThreshold,
 			ConnectFailThreshold: body.ConnectFailThreshold,
+		}
+		if body.Timezone != nil {
+			tz := strings.TrimSpace(*body.Timezone)
+			// Проверяем сразу: неверное имя иначе молча превратилось бы в UTC,
+			// и человек долго гадал бы, почему время не то.
+			if !tgbot.ValidTimezone(tz) {
+				writeError(w, http.StatusBadRequest, "invalid_timezone",
+					"Не знаю такого часового пояса. Пример: Asia/Tashkent, Europe/Moscow")
+				return
+			}
+			patch.Timezone = &tz
 		}
 		if body.Token != nil {
 			tok := strings.TrimSpace(*body.Token)
@@ -336,6 +365,7 @@ func (s *Server) registerTelegramRoutes(mux *http.ServeMux, jwtSecret []byte) {
 				"Настройки приняты, но сохранить их не удалось — после перезапуска панели вернутся прежние")
 			return
 		}
+		tgbot.SetTimezone(s.telegramStore.timezone())
 		if s.telegram != nil {
 			s.telegram.Reconfigure(s.telegramStore.botConfig())
 		}
@@ -397,6 +427,7 @@ func (s *Server) telegramStatus() map[string]any {
 		"admin_id":               cfg.AdminID,
 		"alert_threshold":        cfg.AlertThreshold,
 		"connect_fail_threshold": s.telegramStore.connectFailThreshold(),
+		"timezone":               s.telegramStore.timezone(),
 	}
 	if s.uplink != nil {
 		out["uplink"] = s.uplink.Snapshot()
@@ -421,6 +452,10 @@ func (s *Server) startTelegramBot(client *mtproxylctl.Client) {
 	// Именно поэтому запускается и тогда, когда внешняя проверка выключена в
 	// конфиге: её данные идут из интернета и стоят квоты, а эти — локальные,
 	// от самого движка. Терять мониторинг связи вместе с ней незачем.
+	// Зона применяется до старта бота: первое же сообщение должно уйти в
+	// правильном времени.
+	tgbot.SetTimezone(s.telegramStore.timezone())
+
 	s.uplink = uplink.NewWatcher(
 		uplink.NewClient(s.cfg.Telemt.URL, s.cfg.Telemt.AuthHeader),
 		uplink.DefaultInterval,

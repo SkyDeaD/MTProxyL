@@ -163,7 +163,22 @@ func (w *Watcher) collect(ctx context.Context) *Status {
 	if sum, err := w.client.Summary(ctx); err == nil {
 		st.Connections = sum.ConnectionsTotal
 		st.ConnectionsBad = sum.ConnectionsBadTotal
-		st.TopBadClasses = topClasses(sum.ConnectionsBadByClass, 2)
+		st.TopBadClasses = topClasses(sum.ConnectionsBadByClass, 5)
+		st.TopHandshakeFails = topClasses(sum.HandshakeFailsByClass, 2)
+		for _, c := range sum.HandshakeFailsByClass {
+			st.HandshakeFails += c.Count
+		}
+		st.Users = sum.ConfiguredUsers
+		st.UptimeSecs = sum.UptimeSeconds
+	}
+
+	// Активные адреса и трафик панель считает суммой по списку пользователей —
+	// отдельного агрегата у движка нет.
+	if users, err := w.client.Users(ctx); err == nil {
+		for _, u := range users {
+			st.ActiveIPs += u.ActiveUniqueIPs
+			st.TrafficOct += u.TotalOctets
+		}
 	}
 
 	if info, err := w.client.SystemInfo(ctx); err == nil {

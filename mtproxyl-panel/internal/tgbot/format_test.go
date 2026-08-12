@@ -49,7 +49,7 @@ func TestRenderStatusHasSummaryAndProbes(t *testing.T) {
 
 	for _, want := range []string{
 		"Доступность из РФ — 95%",
-		"Зондов: <b>19 / 20</b>",
+		"19 из 20 зондов",
 		"tg-plug.example.uz:443",
 		"SNI:",
 		"Проверено: 11.08.2026, 17:21:51",
@@ -112,13 +112,67 @@ func TestRenderStatusFitsTelegramLimit(t *testing.T) {
 		r.Probes[i].Error = strings.Repeat("развёрнутое описание отказа ", 5)
 	}
 
-	out := RenderStatus(baseView(r))
+	v := baseView(r)
+	v.Uplink = liveUplink()
+	out := RenderStatus(v)
 
 	if n := len([]rune(out)); n > MessageLimit {
 		t.Fatalf("длина сообщения %d рун, предел %d", n, MessageLimit)
 	}
+	assertBalancedPre(t, out)
+}
+
+// Незакрытый <pre> Telegram не прощает: он отвечает 400, и сообщения не будет
+// вовсе — то есть вместо укороченного статуса не придёт никакого.
+func assertBalancedPre(t *testing.T, out string) {
+	t.Helper()
+	if open, closed := strings.Count(out, "<pre>"), strings.Count(out, "</pre>"); open != closed {
+		t.Fatalf("таблица оборвана: <pre> открыт %d раз, закрыт %d\n---\n%s", open, closed, out[len(out)-300:])
+	}
+}
+
+// Когда зонды не влезают, надо сказать сколько их осталось, а не молча обрезать.
+func TestRenderStatusReportsTruncatedProbes(t *testing.T) {
+	r := sampleResult(50, 0)
+	for i := range r.Probes {
+		// Уникальные причины у каждого зонда — сводка внизу раздувается и
+		// вытесняет строки таблицы.
+		r.Probes[i].Error = fmt.Sprintf("отдельная развёрнутая причина отказа номер %d, весьма многословная", i)
+	}
+	v := baseView(r)
+	v.Uplink = liveUplink()
+
+	out := RenderStatus(v)
+
+	if n := len([]rune(out)); n > MessageLimit {
+		t.Fatalf("длина %d рун превышает предел %d", n, MessageLimit)
+	}
+	assertBalancedPre(t, out)
 	if !strings.Contains(out, "и ещё") {
-		t.Errorf("обрезка произошла молча, без строки об остатке:\n%s", out[len(out)-300:])
+		t.Errorf("обрезка произошла молча, без строки об остатке:\n%s", out[len(out)-400:])
+	}
+}
+
+// Причины отказов не должны повторяться у каждой строки: одна формулировка на
+// пять зондов — это одна строка сводки с количеством.
+func TestRenderStatusGroupsFailureReasons(t *testing.T) {
+	r := sampleResult(20, 17)
+	for i := range r.Probes {
+		if !r.Probes[i].TLSSuccess {
+			r.Probes[i].Error = "Request timeout"
+		}
+	}
+
+	out := RenderStatus(baseView(r))
+
+	if !strings.Contains(out, "Почему не дошли:") {
+		t.Fatalf("нет сводки причин:\n%s", out)
+	}
+	if !strings.Contains(out, "Request timeout — 3") {
+		t.Errorf("причины не сгруппированы с количеством:\n%s", out)
+	}
+	if n := strings.Count(out, "Request timeout"); n != 1 {
+		t.Errorf("причина повторяется %d раз, ожидалась одна строка сводки", n)
 	}
 }
 
@@ -615,5 +669,108 @@ func TestRenderStatusHidesLoadWhenUnknown(t *testing.T) {
 
 	if out := RenderStatus(v); strings.Contains(out, "Соединений:") {
 		t.Errorf("показан пустой блок нагрузки:\n%s", out)
+	}
+}
+
+// ── Таблица зондов и статистика ─────────────────────────────────────────────
+
+func TestRenderStatusProbeTableHasHeaderAndAlignment(t *testing.T) {
+	r := sampleResult(3, 3)
+	r.Probes[0].City, r.Probes[0].Network = "Novosibirsk", "MTS"
+	r.Probes[1].City, r.Probes[1].Network = "Saint Petersburg", "SkyNET"
+	r.Probes[2].City, r.Probes[2].Network = "Ufa", "New Hosting Technologies"
+
+	out := RenderStatus(baseView(r))
+
+	if !strings.Contains(out, "Город") || !strings.Contains(out, "Провайдер") {
+		t.Errorf("нет заголовка колонок:\n%s", out)
+	}
+	assertBalancedPre(t, out)
+	// Города разной длины должны занимать одинаковую ширину — иначе колонка
+	// провайдеров разъедется и смысл таблицы теряется.
+	if !strings.Contains(out, "✅ Novosibirsk       MTS") {
+		t.Errorf("колонки не выровнены:\n%s", out)
+	}
+	if strings.Contains(out, "MTS   \n") {
+		t.Errorf("в конце строк остались лишние пробелы:\n%s", out)
+	}
+}
+
+func TestRenderStatusLoadBlock(t *testing.T) {
+	v := baseView(sampleResult(2, 2))
+	u := liveUplink()
+	u.Connections, u.ConnectionsBad = 395317, 34029
+	u.ActiveIPs, u.TrafficOct, u.Users = 86, 74500000000, 1
+	u.HandshakeFails = 11936
+	u.TopBadClasses = []uplink.ClassCount{{Class: "TLS handshake — bad client", Count: 23326}}
+	u.TopHandshakeFails = []uplink.ClassCount{{Class: "Таймаут", Count: 4234}}
+	v.Uplink = u
+
+	out := RenderStatus(v)
+
+	for _, want := range []string{
+		"Соединений: 395 317",
+		"с ошибкой 34 029",
+		"активных IP 86",
+		"трафик 69.4 ГБ",
+		"пользователей 1",
+		"Ошибки соединений:",
+		"Сбои рукопожатия: 11 936",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("в блоке нагрузки нет %q\n---\n%s", want, out)
+		}
+	}
+	assertBalancedPre(t, out)
+}
+
+// Подпись зоны должна называть саму зону, а не только смещение: «Asia/Tashkent»
+// — это то, что человек вводил в панели и видит в timedatectl.
+func TestZoneNoteNamesTheZone(t *testing.T) {
+	resetZoneCache()
+	t.Cleanup(resetZoneCache)
+	SetTimezone("Asia/Tashkent")
+
+	out := RenderStatus(baseView(sampleResult(2, 2)))
+
+	if !strings.Contains(out, "Asia/Tashkent") {
+		t.Errorf("в подписи нет имени зоны:\n%s", out[len(out)-200:])
+	}
+	if !strings.Contains(out, "UTC+05") {
+		t.Errorf("в подписи нет смещения:\n%s", out[len(out)-200:])
+	}
+}
+
+// Заданная в панели зона перекрывает системную — без этого панель в контейнере
+// всегда писала бы UTC.
+func TestTimezoneOverrideWins(t *testing.T) {
+	resetZoneCache()
+	t.Cleanup(func() {
+		resetZoneCache()
+		tzEnv = os.Getenv
+	})
+	tzEnv = func(string) string { return "UTC" }
+
+	SetTimezone("Europe/Moscow")
+	if got := localZone().String(); got != "Europe/Moscow" {
+		t.Errorf("зона = %q, заданная в панели не применилась", got)
+	}
+
+	SetTimezone("")
+	if got := localZone().String(); got != "UTC" {
+		t.Errorf("зона = %q, после сброса ожидалось автоопределение", got)
+	}
+}
+
+func TestValidTimezone(t *testing.T) {
+	for _, ok := range []string{"", "Asia/Tashkent", "Europe/Moscow", "UTC"} {
+		if !ValidTimezone(ok) {
+			t.Errorf("ValidTimezone(%q) = false", ok)
+		}
+	}
+	for _, bad := range []string{"Asia/Tashkent2", "чепуха", "Moscow"} {
+		if ValidTimezone(bad) {
+			t.Errorf("ValidTimezone(%q) = true, ожидался отказ", bad)
+		}
 	}
 }

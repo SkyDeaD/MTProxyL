@@ -120,7 +120,7 @@ func (b *Bot) handleCommand(ctx context.Context, client *Client, chatID int64, c
 		// Сообщение переезжает вниз чата — тихо, без звука. Иначе выходит
 		// странность: человек попросил статус, статус обновился, но остался
 		// висеть выше в истории, и выглядит это как «ничего не произошло».
-		b.forceStatus()
+		b.relocateStatus()
 
 	case cmdCheck:
 		b.runCheckFromChat(ctx, client, chatID)
@@ -142,11 +142,20 @@ func (b *Bot) handleCommand(ctx context.Context, client *Client, chatID int64, c
 	}
 }
 
-// forceStatus просит перерисовать статус в обход ограничения частоты и
-// переотправить его вниз чата.
-func (b *Bot) forceStatus() {
+// refreshStatus перерисовывает статус на месте, в обход прореживания правок.
+// Это поведение кнопки под сообщением: человек уже смотрит на него.
+func (b *Bot) refreshStatus() {
 	b.mu.Lock()
 	b.forceRedraw = true
+	b.mu.Unlock()
+	b.requestRedraw()
+}
+
+// relocateStatus вдобавок переносит сообщение вниз чата — поведение команды
+// /status, которую набирают, когда сообщение уехало вверх.
+func (b *Bot) relocateStatus() {
+	b.mu.Lock()
+	b.forceRedraw, b.relocate = true, true
 	b.mu.Unlock()
 	b.requestRedraw()
 }
@@ -177,7 +186,7 @@ func (b *Bot) runCheckFromChat(ctx context.Context, client *Client, chatID int64
 			}
 		}()
 	}
-	b.forceStatus()
+	b.relocateStatus()
 }
 
 // setMute включает или снимает паузу тревог.
@@ -223,5 +232,5 @@ func (b *Bot) setMute(ctx context.Context, client *Client, chatID int64, d time.
 			log.Printf("[tgbot] не удалось сообщить о паузе: %s", err)
 		}
 	}
-	b.forceStatus()
+	b.refreshStatus()
 }

@@ -119,9 +119,11 @@ type Bot struct {
 	// сервиса определения IP, а не состояние, которое надо помнить.
 	pendingIP  string
 	lastEditAt time.Time
-	// forceRedraw просит следующую перерисовку пройти в обход ограничения
-	// частоты: её ждёт человек, нажавший кнопку или набравший команду.
+	// forceRedraw просит следующую перерисовку пройти в обход прореживания:
+	// её ждёт человек, нажавший кнопку или набравший команду. relocate вдобавок
+	// переносит сообщение вниз чата.
 	forceRedraw bool
+	relocate    bool
 
 	// results и uplinks принимают вердикты источников. Ёмкость 1 с
 	// вытеснением: если воркер занят, копится не очередь, а только самый
@@ -542,10 +544,16 @@ type delivery struct {
 	// остальными разовыми событиями, чтобы порядок был предсказуем.
 	ipChanged bool
 
-	// Force — правка нужна немедленно, в обход ограничения частоты: команда
-	// или кнопка от человека, ждущего ответа.
+	// Force — правка нужна немедленно, в обход прореживания: её ждёт человек.
 	Force bool
-	Now   time.Time
+	// Relocate — сообщение надо переотправить вниз чата.
+	//
+	// Отдельно от Force намеренно. Кнопка «Обновить» висит под самим
+	// сообщением: человек уже смотрит на него, и правильно поправить его на
+	// месте. А команду /status набирают именно тогда, когда сообщение уехало
+	// вверх и его надо поднять.
+	Relocate bool
+	Now      time.Time
 }
 
 func (d *delivery) addAvailability(av Decision) {
@@ -621,8 +629,8 @@ func (b *Bot) handleRedraw(ctx context.Context) {
 		}
 	}
 	inc := b.state.Incidents
-	force := b.forceRedraw
-	b.forceRedraw = false
+	force, relocate := b.forceRedraw, b.relocate
+	b.forceRedraw, b.relocate = false, false
 	b.mu.Unlock()
 
 	b.deliver(ctx, delivery{
@@ -632,6 +640,7 @@ func (b *Bot) handleRedraw(ctx context.Context) {
 		UplinkSince:    inc.Uplink.Since,
 		EngineSince:    inc.Engine.Since,
 		Force:          force,
+		Relocate:       relocate,
 		Now:            b.now(),
 	})
 }
@@ -702,7 +711,7 @@ func (b *Bot) deliver(ctx context.Context, d delivery) {
 	// Отдельный случай — Force без события: команда «покажи статус». Она тоже
 	// переотправляет сообщение, но без звука: человек попросил показать статус,
 	// и он должен оказаться внизу чата, а не остаться где-то выше в истории.
-	if !d.Loud && !d.Force && messageID != 0 {
+	if !d.Loud && !d.Relocate && messageID != 0 {
 		err := client.EditMessageText(ctx, cfg.AdminID, messageID, text, kb)
 		if err == nil {
 			b.noteEdit()
@@ -919,7 +928,7 @@ func (b *Bot) replyStart(ctx context.Context, client *Client, chatID int64) {
 	if known {
 		// Теперь чат точно существует — можно сузить подсказки команд до него.
 		b.registerCommands(ctx, client, adminID)
-		b.forceStatus()
+		b.refreshStatus()
 	}
 }
 
@@ -932,7 +941,9 @@ func (b *Bot) handleCallback(ctx context.Context, client *Client, adminID int64,
 	switch q.Data {
 	case callbackRefresh:
 		_ = client.AnswerCallbackQuery(ctx, q.ID, "Обновляю по последним данным", false)
-		b.requestRedraw()
+		// Правим на месте: кнопка висит под этим же сообщением, человек уже
+		// смотрит на него — переносить его вниз чата незачем.
+		b.refreshStatus()
 
 	case callbackCheck:
 		if b.deps.RunCheckNow == nil {
