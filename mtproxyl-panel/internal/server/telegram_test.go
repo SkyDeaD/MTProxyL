@@ -12,6 +12,7 @@ import (
 
 	"github.com/Liafanx/mtproxyl-panel/internal/config"
 	"github.com/Liafanx/mtproxyl-panel/internal/tgbot"
+	"github.com/Liafanx/mtproxyl-panel/internal/uplink"
 )
 
 const goodToken = "123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw"
@@ -248,7 +249,12 @@ func TestTelegramStoreKeepsBotMemoryAcrossRestart(t *testing.T) {
 	notify := time.Now().Add(-10 * time.Minute).Truncate(time.Second)
 	state := tgbot.PersistedState{
 		MessageID: 4242,
-		Alert:     tgbot.AlertState{Active: true, Since: since, LastNotify: notify, LastPct: 45, HasPct: true},
+		Incidents: tgbot.Incidents{
+			Availability: tgbot.AlertState{Active: true, Since: since, LastNotify: notify, LastPct: 45, HasPct: true},
+			Uplink:       tgbot.IncidentState{Active: true, Since: since, LastNotify: notify},
+			LastKnownIP:  "203.0.113.10",
+			MutedUntil:   notify,
+		},
 	}
 	if err := s.saveState(state); err != nil {
 		t.Fatalf("saveState: %v", err)
@@ -258,11 +264,21 @@ func TestTelegramStoreKeepsBotMemoryAcrossRestart(t *testing.T) {
 	if got.MessageID != 4242 {
 		t.Errorf("MessageID = %d, want 4242", got.MessageID)
 	}
-	if !got.Alert.Active || !got.Alert.HasPct || got.Alert.LastPct != 45 {
-		t.Errorf("Alert = %+v", got.Alert)
+	av := got.Incidents.Availability
+	if !av.Active || !av.HasPct || av.LastPct != 45 {
+		t.Errorf("доступность = %+v", av)
 	}
-	if !got.Alert.Since.Equal(since) || !got.Alert.LastNotify.Equal(notify) {
-		t.Errorf("времена не совпали: %+v против since=%v notify=%v", got.Alert, since, notify)
+	if !av.Since.Equal(since) || !av.LastNotify.Equal(notify) {
+		t.Errorf("времена не совпали: %+v против since=%v notify=%v", av, since, notify)
+	}
+	if !got.Incidents.Uplink.Active || !got.Incidents.Uplink.Since.Equal(since) {
+		t.Errorf("состояние связи не пережило перезапуск: %+v", got.Incidents.Uplink)
+	}
+	if got.Incidents.LastKnownIP != "203.0.113.10" {
+		t.Errorf("LastKnownIP = %q", got.Incidents.LastKnownIP)
+	}
+	if !got.Incidents.MutedUntil.Equal(notify) {
+		t.Errorf("пауза не пережила перезапуск: %v", got.Incidents.MutedUntil)
 	}
 }
 
@@ -352,5 +368,68 @@ func TestBotTokenPattern(t *testing.T) {
 		if got := botTokenRe.MatchString(token); got != want {
 			t.Errorf("botTokenRe(%q) = %v, want %v", token, got, want)
 		}
+	}
+}
+
+// Файл из первой версии бота уже лежит у пользователей. Обновление обязано
+// прочитать его без потерь: новых ключей там нет, и ноль в них означает
+// «инцидента не было», а не «авария» — ложной тревоги задним числом быть не
+// должно.
+func TestTelegramStoreReadsPreUplinkFile(t *testing.T) {
+	dir := t.TempDir()
+	old := `{"enabled":true,"token":"` + goodToken + `","admin_id":555,"alert_threshold":60,` +
+		`"status_message_id":4242,"alert_active":true,"alert_since_unix":1750000000,` +
+		`"last_alert_unix":1750001000,"last_percentage":45,"has_percentage":true}`
+	if err := os.WriteFile(filepath.Join(dir, telegramBotFile), []byte(old), 0o600); err != nil {
+		t.Fatalf("подготовка: %v", err)
+	}
+
+	s := newTelegramBotStore(dir)
+
+	cfg := s.botConfig()
+	if !cfg.Enabled || cfg.Token != goodToken || cfg.AdminID != 555 {
+		t.Errorf("настройки из старого файла потеряны: %+v", cfg)
+	}
+
+	st := s.botState()
+	if st.MessageID != 4242 {
+		t.Errorf("MessageID = %d — бот прислал бы новое сообщение вместо правки старого", st.MessageID)
+	}
+	if !st.Incidents.Availability.Active || st.Incidents.Availability.LastPct != 45 {
+		t.Errorf("состояние аварии доступности потеряно: %+v", st.Incidents.Availability)
+	}
+	if st.Incidents.Uplink.Active || st.Incidents.Engine.Active {
+		t.Errorf("новые инциденты прочитались активными из старого файла: %+v", st.Incidents)
+	}
+	if st.Incidents.Muted(time.Now()) {
+		t.Error("из старого файла прочиталась пауза, которой там нет")
+	}
+	if s.connectFailThreshold() != uplink.DefaultFailRateThreshold {
+		t.Errorf("порог ошибок = %v, ожидалось умолчание", s.connectFailThreshold())
+	}
+}
+
+// И наоборот: запись поверх старого файла не должна терять его поля.
+func TestTelegramStoreUpgradesFileInPlace(t *testing.T) {
+	dir := t.TempDir()
+	old := `{"enabled":true,"token":"` + goodToken + `","admin_id":555,"status_message_id":4242}`
+	if err := os.WriteFile(filepath.Join(dir, telegramBotFile), []byte(old), 0o600); err != nil {
+		t.Fatalf("подготовка: %v", err)
+	}
+
+	s := newTelegramBotStore(dir)
+	if err := s.saveState(tgbot.PersistedState{
+		MessageID: 4242,
+		Incidents: tgbot.Incidents{Uplink: tgbot.IncidentState{Active: true}},
+	}); err != nil {
+		t.Fatalf("saveState: %v", err)
+	}
+
+	reloaded := newTelegramBotStore(dir)
+	if !reloaded.hasToken() || reloaded.botConfig().AdminID != 555 {
+		t.Errorf("настройки потеряны при дозаписи состояния: %+v", reloaded.botConfig())
+	}
+	if !reloaded.botState().Incidents.Uplink.Active {
+		t.Error("новое состояние не сохранилось")
 	}
 }
