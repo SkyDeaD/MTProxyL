@@ -690,3 +690,108 @@ func TestOnUplinkNeverBlocks(t *testing.T) {
 		t.Fatal("OnUplink заблокировался — наблюдение встало бы вместе с ним")
 	}
 }
+
+// ── Чистый чат ──────────────────────────────────────────────────────────────
+
+// Нажатие кнопки клавиатуры — обычное входящее сообщение. Оно убирается сразу,
+// иначе чат зарастает лентой из «Статус» и «Проверить».
+func TestHandleMessageDeletesIncoming(t *testing.T) {
+	b, rec := newTestBot(t, Deps{}, PersistedState{MessageID: 77})
+
+	b.handleMessage(context.Background(), b.client, 555,
+		&Message{MessageID: 4242, Chat: Chat{ID: 555}, Text: btnStatus})
+
+	del := rec.find("deleteMessage")
+	if del == nil {
+		t.Fatalf("нажатие не удалено, вызовы: %v", rec.methods())
+	}
+	if got := del.Body["message_id"]; got != float64(4242) {
+		t.Errorf("удалили message_id=%v, ожидался 4242", got)
+	}
+}
+
+// Неудача удаления не должна съедать саму команду: сообщение могли убрать
+// руками, а статус человек всё равно ждёт.
+func TestHandleMessageSurvivesDeleteFailure(t *testing.T) {
+	b, rec := newTestBot(t, Deps{}, PersistedState{MessageID: 77})
+	rec.reply["deleteMessage"] = func(w http.ResponseWriter) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"ok":false,"error_code":400,"description":"message to delete not found"}`))
+	}
+
+	b.handleMessage(context.Background(), b.client, 555,
+		&Message{MessageID: 4242, Chat: Chat{ID: 555}, Text: cmdStatus})
+
+	b.mu.Lock()
+	force, relocate := b.forceRedraw, b.relocate
+	b.mu.Unlock()
+	if !force || !relocate {
+		t.Errorf("команда не обработана: force=%v relocate=%v", force, relocate)
+	}
+}
+
+// Служебных ответов в чате всегда не больше одного: пришёл новый — прежний
+// убран.
+func TestServiceMessageReplacesPrevious(t *testing.T) {
+	var saved []PersistedState
+	b, rec := newTestBot(t, Deps{Persist: func(s PersistedState) error {
+		saved = append(saved, s)
+		return nil
+	}}, PersistedState{MessageID: 77})
+	ctx := context.Background()
+
+	b.sendService(ctx, b.client, 555, "первое", nil, true)
+	if rec.count("deleteMessage") != 0 {
+		t.Errorf("первый служебный ответ не должен ничего удалять: %v", rec.methods())
+	}
+
+	b.sendService(ctx, b.client, 555, "второе", nil, true)
+
+	if rec.count("deleteMessage") != 1 {
+		t.Errorf("прежний служебный ответ не убран: %v", rec.methods())
+	}
+	b.mu.Lock()
+	id := b.state.ServiceMessageID
+	b.mu.Unlock()
+	if id == 0 {
+		t.Error("id служебного ответа не сохранён — после перезапуска его будет не убрать")
+	}
+	if len(saved) != 2 || saved[1].ServiceMessageID != id {
+		t.Errorf("состояние на диск не ушло: %+v", saved)
+	}
+}
+
+// Переезд статуса вниз чата уносит служебный ответ: свежие цифры уже перед
+// глазами, а прошлое подтверждение выше по истории только мешает.
+func TestDeliverClearsServiceMessage(t *testing.T) {
+	b, rec := newTestBot(t, Deps{}, PersistedState{MessageID: 77, ServiceMessageID: 88})
+	b.lastGood = verdict(95)
+
+	b.deliver(context.Background(), delivery{Now: b.now(), Relocate: true})
+
+	if rec.count("deleteMessage") < 2 {
+		t.Errorf("служебный ответ остался в чате: %v", rec.methods())
+	}
+	b.mu.Lock()
+	id := b.state.ServiceMessageID
+	b.mu.Unlock()
+	if id != 0 {
+		t.Errorf("слот служебного ответа не очищен: %d", id)
+	}
+}
+
+// Ответ на /start несёт постоянную клавиатуру. Через служебный слот он не
+// идёт: документация Telegram нигде не обещает, что клавиатура переживёт
+// удаление своего сообщения, а остаться без кнопок — хуже лишней строки.
+func TestStartReplyStaysOutOfServiceSlot(t *testing.T) {
+	b, _ := newTestBot(t, Deps{}, PersistedState{})
+
+	b.replyStart(context.Background(), b.client, 555)
+
+	b.mu.Lock()
+	id := b.state.ServiceMessageID
+	b.mu.Unlock()
+	if id != 0 {
+		t.Errorf("ответ на /start попал в слот служебных: %d", id)
+	}
+}

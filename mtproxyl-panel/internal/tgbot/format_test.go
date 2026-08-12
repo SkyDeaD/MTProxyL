@@ -55,7 +55,7 @@ func TestRenderStatusHasSummaryAndProbes(t *testing.T) {
 		"Проверено: 11.08.2026, 17:21:51",
 		"Автопроверка: включена, раз в 15 мин",
 		"Квота Globalping: 180 / 250",
-		"<b>Зонды (20):</b>",
+		"Зонды (20)",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("в сообщении нет %q\n---\n%s", want, out)
@@ -113,21 +113,58 @@ func TestRenderStatusFitsTelegramLimit(t *testing.T) {
 	}
 
 	v := baseView(r)
-	v.Uplink = liveUplink()
+	v.Uplink = loadedUplink()
 	out := RenderStatus(v)
 
 	if n := len([]rune(out)); n > MessageLimit {
 		t.Fatalf("длина сообщения %d рун, предел %d", n, MessageLimit)
 	}
 	assertBalancedPre(t, out)
+	// Ужиматься должен список зондов, а не показатели связи: они и есть повод
+	// читать сообщение.
+	for _, want := range []string{"Писатели", "Нагрузка", "Всего соединений"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("при полусотне зондов пропало %q", want)
+		}
+	}
+}
+
+// loadedUplink — нагруженный сервер: двенадцать дата-центров и полная
+// статистика. На нём проверяется, что сообщение остаётся в пределах лимита.
+func loadedUplink() *uplink.Status {
+	u := liveUplink()
+	rtt := 142.0
+	u.DCs = nil
+	for _, n := range []int{-203, -5, -4, -3, -2, -1, 1, 2, 3, 4, 5, 203} {
+		u.DCs = append(u.DCs, uplink.DCRtt{
+			DC: n, RTTEmaMs: &rtt, AliveWriters: 3, RequiredWriters: 3, CoveragePct: 100,
+		})
+	}
+	u.Connections, u.ConnectionsBad = 414515, 34556
+	u.Users, u.ActiveIPs, u.TrafficOct = 1, 44, 77200000000
+	u.HandshakeFails = 12832
+	for i := range 6 {
+		u.BadClasses = append(u.BadClasses, uplink.ClassCount{
+			Class: strings.Repeat("длинное имя класса ", 2) + fmt.Sprint(i), Count: int64(1000 - i),
+		})
+		u.HandshakeClasses = append(u.HandshakeClasses, uplink.ClassCount{
+			Class: strings.Repeat("причина сбоя ", 2) + fmt.Sprint(i), Count: int64(500 - i),
+		})
+	}
+	return u
 }
 
 // Незакрытый <pre> Telegram не прощает: он отвечает 400, и сообщения не будет
 // вовсе — то есть вместо укороченного статуса не придёт никакого.
 func assertBalancedPre(t *testing.T, out string) {
 	t.Helper()
-	if open, closed := strings.Count(out, "<pre>"), strings.Count(out, "</pre>"); open != closed {
+	if open, closed := strings.Count(out, "<pre"), strings.Count(out, "</pre>"); open != closed {
 		t.Fatalf("таблица оборвана: <pre> открыт %d раз, закрыт %d\n---\n%s", open, closed, out[len(out)-300:])
+	}
+	// Блок открывается парой тегов, значит и закрываться обязан парой: с одним
+	// незакрытым <code> Telegram отвечает 400 так же охотно.
+	if open, closed := strings.Count(out, "<code"), strings.Count(out, "</code>"); open != closed {
+		t.Fatalf("кодовый блок оборван: <code> открыт %d раз, закрыт %d\n---\n%s", open, closed, out[len(out)-300:])
 	}
 }
 
@@ -403,7 +440,8 @@ func TestRenderStatusHasUplinkBlock(t *testing.T) {
 		"Писатели: <b>65</b> живых / 43 нужно",
 		"Попыток подключения: 1000",
 		"отброшено ретраев",
-		"DC 1: 142 мс",
+		"DC 1",
+		"142 мс",
 		"Движок: 1.2.3",
 	} {
 		if !strings.Contains(out, want) {
@@ -411,7 +449,7 @@ func TestRenderStatusHasUplinkBlock(t *testing.T) {
 		}
 	}
 	// Дата-центр без писателей показывается, но аварией не объявляется.
-	if !strings.Contains(out, "DC 3: —") {
+	if !strings.Contains(out, "⚪ DC 3") || !strings.Contains(out, "—") {
 		t.Errorf("дата-центр без RTT не показан:\n%s", out)
 	}
 }
@@ -651,12 +689,12 @@ func TestRenderStatusShowsLoad(t *testing.T) {
 	u := liveUplink()
 	u.Connections = 15198
 	u.ConnectionsBad = 2105
-	u.TopBadClasses = []uplink.ClassCount{{Class: "TLS handshake — bad client", Count: 1998}}
+	u.BadClasses = []uplink.ClassCount{{Class: "TLS handshake — bad client", Count: 1998}}
 	v.Uplink = u
 
 	out := RenderStatus(v)
 
-	for _, want := range []string{"Соединений: 15 198", "с ошибкой", "TLS handshake"} {
+	for _, want := range []string{"Всего соединений", "15 198", "Ошибочных", "TLS handshake"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("в блоке нагрузки нет %q\n---\n%s", want, out)
 		}
@@ -702,20 +740,21 @@ func TestRenderStatusLoadBlock(t *testing.T) {
 	u.Connections, u.ConnectionsBad = 395317, 34029
 	u.ActiveIPs, u.TrafficOct, u.Users = 86, 74500000000, 1
 	u.HandshakeFails = 11936
-	u.TopBadClasses = []uplink.ClassCount{{Class: "TLS handshake — bad client", Count: 23326}}
-	u.TopHandshakeFails = []uplink.ClassCount{{Class: "Таймаут", Count: 4234}}
+	u.BadClasses = []uplink.ClassCount{{Class: "TLS handshake — bad client", Count: 23326}}
+	u.HandshakeClasses = []uplink.ClassCount{{Class: "Таймаут", Count: 4234}}
 	v.Uplink = u
 
 	out := RenderStatus(v)
 
 	for _, want := range []string{
-		"Соединений: 395 317",
-		"с ошибкой 34 029",
-		"активных IP 86",
-		"трафик 69.4 ГБ",
-		"пользователей 1",
-		"Ошибки соединений:",
-		"Сбои рукопожатия: 11 936",
+		"Всего соединений",
+		"395 317",
+		"34 029 (8.6%)",
+		"Активных IP",
+		"69.4 ГБ",
+		"Пользователей",
+		"Ошибки соединений",
+		"Сбои рукопожатия",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("в блоке нагрузки нет %q\n---\n%s", want, out)
@@ -772,5 +811,61 @@ func TestValidTimezone(t *testing.T) {
 		if ValidTimezone(bad) {
 			t.Errorf("ValidTimezone(%q) = true, ожидался отказ", bad)
 		}
+	}
+}
+
+// ── Таблица дата-центров ────────────────────────────────────────────────────
+
+// Боевой снимок: номера бывают отрицательными, у части дата-центров писателей
+// нет вовсе. Всё это показывается — решение об аварии принимается по сумме.
+func TestRenderStatusDCTableHandlesProductionSnapshot(t *testing.T) {
+	rtt := 37.7
+	v := baseView(sampleResult(2, 2))
+	u := liveUplink()
+	u.DCs = []uplink.DCRtt{
+		{DC: -203, RTTEmaMs: &rtt, AliveWriters: 3, RequiredWriters: 3, CoveragePct: 100},
+		{DC: -3, RTTEmaMs: nil, AliveWriters: 0, RequiredWriters: 3, CoveragePct: 0},
+		{DC: 4, RTTEmaMs: &rtt, AliveWriters: 6, RequiredWriters: 10, CoveragePct: 60},
+	}
+	v.Uplink = u
+
+	out := RenderStatus(v)
+
+	for _, want := range []string{
+		"Писатели", "Покрытие",
+		"✅ DC -203", // отрицательные номера печатаются как есть
+		"⚪ DC -3",   // дата-центр без писателей виден, но не тревога
+		"6 / 10",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("в таблице дата-центров нет %q\n---\n%s", want, out)
+		}
+	}
+	// Колонки должны совпадать по ширине, иначе таблица теряет смысл.
+	if !strings.Contains(out, "✅ DC -203") || !strings.Contains(out, "⚪ DC -3   ") {
+		t.Errorf("колонка номеров не выровнена:\n%s", out)
+	}
+	assertBalancedPre(t, out)
+}
+
+// Длинный хвост из единичных причин не должен вытеснять список зондов.
+func TestRenderStatusFoldsLongClassTail(t *testing.T) {
+	v := baseView(sampleResult(2, 2))
+	u := liveUplink()
+	u.Connections, u.ConnectionsBad = 1000, 120
+	for i := range 12 {
+		u.BadClasses = append(u.BadClasses, uplink.ClassCount{
+			Class: fmt.Sprintf("класс_%d", i), Count: int64(10),
+		})
+	}
+	v.Uplink = u
+
+	out := RenderStatus(v)
+
+	if !strings.Contains(out, "прочие") {
+		t.Errorf("хвост причин не свёрнут:\n%s", out)
+	}
+	if strings.Contains(out, "класс_11") {
+		t.Errorf("показаны все причины, хотя хвост должен быть свёрнут:\n%s", out)
 	}
 }

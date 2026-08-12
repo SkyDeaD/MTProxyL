@@ -57,9 +57,16 @@ type Config struct {
 }
 
 // PersistedState — то, что обязано пережить перезапуск панели.
+//
+// ServiceMessageID — последний служебный ответ бота (справка, подтверждение
+// паузы, отказ). Он живёт в единственном экземпляре: приходит новый — прежний
+// убирается. Хранится вместе с остальным, потому что после перезапуска панели
+// висящий в чате служебный ответ иначе стал бы неудаляемым и остался бы
+// навсегда — ровно тот мусор, ради избавления от которого всё и затевалось.
 type PersistedState struct {
-	MessageID int
-	Incidents Incidents
+	MessageID        int
+	ServiceMessageID int
+	Incidents        Incidents
 }
 
 // Deps — всё, что боту нужно от остальной панели. Функциями, а не ссылкой на
@@ -335,6 +342,9 @@ func (b *Bot) TestConnection(ctx context.Context) (string, error) {
 	if adminID == 0 {
 		return me.Username, ErrNoAdmin
 	}
+	// Тестовое сообщение отправляем напрямую, а не через служебный слот:
+	// панель ждёт от него ошибку, чтобы показать её в форме, — а слот ошибку
+	// проглатывает в журнал, потому что для чата она несущественна.
 	if _, err := client.SendMessage(ctx, adminID, RenderTestMessage(b.now()), nil, false); err != nil {
 		return me.Username, err
 	}
@@ -762,6 +772,9 @@ func (b *Bot) deliver(ctx context.Context, d delivery) {
 	if messageID != 0 && messageID != sent.MessageID {
 		b.retireMessage(ctx, client, cfg.AdminID, messageID)
 	}
+	// Заодно уносим служебный ответ: свежий статус только что пришёл вниз
+	// чата, и прошлое подтверждение выше по истории уже ничего не добавляет.
+	b.clearService(ctx, client, cfg.AdminID)
 }
 
 // retireMessage убирает прежнее живое сообщение. Telegram не даёт боту удалять
@@ -777,6 +790,60 @@ func (b *Bot) retireMessage(ctx context.Context, client *Client, chatID int64, m
 			return
 		}
 		log.Printf("[tgbot] прежнее сообщение осталось в чате: %s", err)
+	}
+}
+
+// sendService отправляет служебный ответ — справку, подтверждение паузы,
+// отказ — и убирает предыдущий такой же. Служебных сообщений в чате всегда не
+// больше одного: они нужны ровно в момент прочтения, а копятся навсегда.
+//
+// Порядок «сначала отправить, потом удалить прежнее» тот же, что у статуса:
+// сорвавшаяся отправка не должна оставить человека вообще без ответа.
+func (b *Bot) sendService(ctx context.Context, client *Client, chatID int64, text string, kb any, silent bool) {
+	sent, err := client.SendMessage(ctx, chatID, text, kb, silent)
+	if err != nil {
+		log.Printf("[tgbot] служебное сообщение не ушло: %s", err)
+		return
+	}
+
+	b.mu.Lock()
+	prev := b.state.ServiceMessageID
+	b.state.ServiceMessageID = sent.MessageID
+	persist, state := b.deps.Persist, b.state
+	b.mu.Unlock()
+
+	if prev != 0 && prev != sent.MessageID {
+		b.dropMessage(ctx, client, chatID, prev)
+	}
+	if persist != nil {
+		if err := persist(state); err != nil {
+			log.Printf("[tgbot] не удалось сохранить состояние: %s", err)
+		}
+	}
+}
+
+// clearService убирает служебный ответ, если он ещё висит. Зовётся, когда
+// статус переезжает вниз чата: человек и так смотрит на свежие цифры, а
+// прошлое подтверждение выше по истории только мешает.
+func (b *Bot) clearService(ctx context.Context, client *Client, chatID int64) {
+	b.mu.Lock()
+	id := b.state.ServiceMessageID
+	b.state.ServiceMessageID = 0
+	b.mu.Unlock()
+
+	if id != 0 {
+		b.dropMessage(ctx, client, chatID, id)
+	}
+}
+
+// dropMessage удаляет сообщение и молчит о том, что удалять было уже нечего:
+// человек мог убрать его сам, и это не повод для записи в журнал.
+func (b *Bot) dropMessage(ctx context.Context, client *Client, chatID int64, messageID int) {
+	if err := client.DeleteMessage(ctx, chatID, messageID); err != nil {
+		if apiErr, ok := asAPIError(err); ok && apiErr.IsMessageGone() {
+			return
+		}
+		log.Printf("[tgbot] сообщение осталось в чате: %s", err)
 	}
 }
 
@@ -893,6 +960,8 @@ func (b *Bot) handleUpdate(ctx context.Context, client *Client, adminID int64, u
 func (b *Bot) handleMessage(ctx context.Context, client *Client, adminID int64, m *Message) {
 	cmd := normalizeCommand(m.Text)
 	if cmd == "" || !strings.HasPrefix(cmd, "/") {
+		// Обычный текст админ пишет боту сам и осознанно — стирать его не наше
+		// дело. Убираем только то, что человек нажал ради действия.
 		return
 	}
 
@@ -906,6 +975,13 @@ func (b *Bot) handleMessage(ctx context.Context, client *Client, adminID int64, 
 	if adminID == 0 && cmd != cmdStart {
 		return
 	}
+
+	// Само нажатие убираем: кнопки клавиатуры шлют обычный текст, и без этого
+	// чат зарастает лентой из «Статус» и «Проверить». Bot API разрешает боту
+	// удалять входящие в личной переписке — но только моложе 48 часов, поэтому
+	// делаем это сразу, а не когда-нибудь потом.
+	b.dropMessage(ctx, client, m.Chat.ID, m.MessageID)
+
 	b.handleCommand(ctx, client, m.Chat.ID, cmd)
 }
 

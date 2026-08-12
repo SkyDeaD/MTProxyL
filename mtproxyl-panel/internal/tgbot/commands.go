@@ -126,19 +126,15 @@ func (b *Bot) handleCommand(ctx context.Context, client *Client, chatID int64, c
 		b.runCheckFromChat(ctx, client, chatID)
 
 	case cmdMute:
-		if _, err := client.SendMessage(ctx, chatID,
+		b.sendService(ctx, client, chatID,
 			"На сколько заглушить тревоги?\n\nСтатус всё это время продолжит обновляться тихо.",
-			muteKeyboard(), true); err != nil {
-			log.Printf("[tgbot] не удалось предложить паузу: %s", err)
-		}
+			muteKeyboard(), true)
 
 	case cmdUnmute:
 		b.setMute(ctx, client, chatID, 0, false)
 
 	case cmdHelp:
-		if _, err := client.SendMessage(ctx, chatID, RenderHelp(), nil, true); err != nil {
-			log.Printf("[tgbot] справка не ушла: %s", err)
-		}
+		b.sendService(ctx, client, chatID, RenderHelp(), nil, true)
 	}
 }
 
@@ -163,7 +159,7 @@ func (b *Bot) relocateStatus() {
 // runCheckFromChat запускает настоящую проверку по команде.
 func (b *Bot) runCheckFromChat(ctx context.Context, client *Client, chatID int64) {
 	if b.deps.RunCheckNow == nil {
-		_, _ = client.SendMessage(ctx, chatID, "Проверка доступности недоступна.", nil, true)
+		b.sendService(ctx, client, chatID, "Проверка доступности недоступна.", nil, true)
 		return
 	}
 	// Кулдаун и исчерпанная квота отвечают мгновенно, настоящее измерение идёт
@@ -176,7 +172,7 @@ func (b *Bot) runCheckFromChat(ctx context.Context, client *Client, chatID int64
 	select {
 	case err := <-done:
 		if err != nil {
-			_, _ = client.SendMessage(ctx, chatID, "Проверка не запущена: "+esc(err.Error()), nil, true)
+			b.sendService(ctx, client, chatID, "Проверка не запущена: "+esc(err.Error()), nil, true)
 			return
 		}
 	case <-time.After(fastFailWindow):
@@ -228,9 +224,7 @@ func (b *Bot) setMute(ctx context.Context, client *Client, chatID int64, d time.
 		text = "🔔 Пауза снята, тревоги снова включены."
 	}
 	if chatID != 0 {
-		if _, err := client.SendMessage(ctx, chatID, text, nil, false); err != nil {
-			log.Printf("[tgbot] не удалось сообщить о паузе: %s", err)
-		}
+		b.sendService(ctx, client, chatID, text, nil, false)
 	}
 	b.refreshStatus()
 }

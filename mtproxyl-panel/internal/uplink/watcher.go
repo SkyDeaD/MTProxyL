@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -48,6 +49,9 @@ type Watcher struct {
 	short    int
 	errored  int
 	onResult func(*Status)
+	// complaints — о чём уже пожаловались в журнал, чтобы не повторяться
+	// каждую минуту: ключ — что опрашивали, значение — прошлая причина.
+	complaints map[string]string
 }
 
 func NewWatcher(client *Client, interval time.Duration, threshold func() float64) *Watcher {
@@ -160,31 +164,36 @@ func (w *Watcher) collect(ctx context.Context) *Status {
 	st.EngineUp = health.Status == "ok" || health.Status == ""
 	st.EngineReadOnly = health.ReadOnly
 
-	if sum, err := w.client.Summary(ctx); err == nil {
-		st.Connections = sum.ConnectionsTotal
-		st.ConnectionsBad = sum.ConnectionsBadTotal
-		st.TopBadClasses = topClasses(sum.ConnectionsBadByClass, 5)
-		st.TopHandshakeFails = topClasses(sum.HandshakeFailsByClass, 2)
+	sum, skipped, err := w.client.Summary(ctx)
+	w.complain("сводка", err, skipped)
+	if err == nil {
+		st.Connections = int64(sum.ConnectionsTotal)
+		st.ConnectionsBad = int64(sum.ConnectionsBadTotal)
+		st.BadClasses = sortClasses(sum.ConnectionsBadByClass)
+		st.HandshakeClasses = sortClasses(sum.HandshakeFailsByClass)
 		for _, c := range sum.HandshakeFailsByClass {
 			st.HandshakeFails += c.Count
 		}
-		st.Users = sum.ConfiguredUsers
-		st.UptimeSecs = sum.UptimeSeconds
+		st.Users = int64(sum.ConfiguredUsers)
 	}
 
 	// Активные адреса и трафик панель считает суммой по списку пользователей —
 	// отдельного агрегата у движка нет.
-	if users, err := w.client.Users(ctx); err == nil {
+	users, err := w.client.Users(ctx)
+	w.complain("список пользователей", err, nil)
+	if err == nil {
 		for _, u := range users {
 			st.ActiveIPs += u.ActiveUniqueIPs
 			st.TrafficOct += u.TotalOctets
 		}
 	}
 
-	if info, err := w.client.SystemInfo(ctx); err == nil {
+	info, skipped, err := w.client.SystemInfo(ctx)
+	w.complain("сведения о системе", err, skipped)
+	if err == nil {
 		st.Version = info.Version
-		st.UptimeSeconds = info.UptimeSeconds
-		st.Restarted = w.noteStart(info.ProcessStartedAt)
+		st.UptimeSeconds = int64(info.UptimeSeconds)
+		st.Restarted = w.noteStart(int64(info.ProcessStartedAt))
 	}
 
 	me, err := w.client.MeQuality(ctx)
@@ -272,15 +281,45 @@ func (w *Watcher) delta(cur UpstreamCounters) (attempts, fails, hard uint64, ok 
 
 // topClasses оставляет несколько самых частых классов ошибок: полный список
 // на десяток строк в сообщении не нужен, а два-три верхних объясняют картину.
-func topClasses(classes []ClassCount, n int) []ClassCount {
+// sortClasses упорядочивает классы по убыванию. Сколько строк показать — дело
+// отрисовки: там это зависит от остатка места в сообщении, а не от числа,
+// зашитого здесь.
+func sortClasses(classes []ClassCount) []ClassCount {
 	if len(classes) == 0 {
 		return nil
 	}
-	sorted := make([]ClassCount, len(classes))
-	copy(sorted, classes)
-	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].Count > sorted[j].Count })
-	if len(sorted) > n {
-		sorted = sorted[:n]
+	sorted := make([]ClassCount, 0, len(classes))
+	for _, c := range classes {
+		if c.Count > 0 {
+			sorted = append(sorted, c)
+		}
 	}
+	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].Count > sorted[j].Count })
 	return sorted
+}
+
+// complain говорит о неудаче вслух, но только когда есть что сказать нового.
+// Опрос идёт раз в минуту, и повтор одной и той же жалобы залил бы журнал —
+// а молчать нельзя: именно молчание однажды скрыло, что вся статистика движка
+// не доезжает до сообщения.
+func (w *Watcher) complain(what string, err error, skipped []string) {
+	var reason string
+	switch {
+	case err != nil:
+		reason = err.Error()
+	case len(skipped) > 0:
+		reason = "не разобраны поля: " + strings.Join(skipped, ", ")
+	}
+
+	w.mu.Lock()
+	if w.complaints == nil {
+		w.complaints = map[string]string{}
+	}
+	same := w.complaints[what] == reason
+	w.complaints[what] = reason
+	w.mu.Unlock()
+
+	if reason != "" && !same {
+		log.Printf("[uplink] %s: %s", what, reason)
+	}
 }
