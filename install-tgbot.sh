@@ -14,7 +14,7 @@
 set -eu
 
 REPO="${REPO:-SkyDeaD/MTProxyL}"
-TAG="${TAG:-mtproxyl-panel-v1.0.7-tg5}"
+TAG="${TAG:-mtproxyl-panel-v1.0.7-tg6}"
 PANEL_BINARY="${PANEL_BINARY:-/usr/local/bin/mtproxyl-panel}"
 SERVICE_NAME="${SERVICE_NAME:-mtproxyl-panel}"
 DATA_DIR="${DATA_DIR:-/var/lib/mtproxyl-panel}"
