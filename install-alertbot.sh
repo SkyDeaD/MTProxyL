@@ -291,11 +291,16 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable --now "$SERVICE" >/dev/null 2>&1 || true
+# enable и restart порознь: «--now» на уже активной службе делает start, а он
+# для неё пустышка — подменённый бинарник остался бы лежать на диске, пока в
+# памяти крутится прежний процесс. Именно так обновление однажды прошло «успешно»
+# и ничего не изменило.
+systemctl enable "$SERVICE" >/dev/null 2>&1 || true
+systemctl restart "$SERVICE" >/dev/null 2>&1 || true
 sleep 1
 
 if systemctl is-active "$SERVICE" >/dev/null 2>&1; then
-    ok "Бот-сторож работает"
+    ok "Бот-сторож работает, версия $("$BIN" --version 2>/dev/null | awk '{print $2}')"
 else
     warn "служба не поднялась — посмотрите: journalctl -u ${SERVICE} -n 50"
 fi
