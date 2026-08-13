@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -43,6 +44,10 @@ func runConfig(path string, args []string) int {
 
 	switch args[0] {
 	case "show":
+		// --json просит панель: ей нужны те же поля, но в разбираемом виде.
+		if len(args) > 1 && args[1] == "--json" {
+			return showConfigJSON(store.Get())
+		}
 		showConfig(store.Get())
 		return 0
 
@@ -73,6 +78,37 @@ func runConfig(path string, args []string) int {
 		fmt.Print(configUsage)
 		return 2
 	}
+}
+
+// showConfigJSON печатает настройки одной строкой. Токена здесь нет — только
+// признак: вывод уходит в панель, а оттуда в браузер.
+func showConfigJSON(cfg config.Config) int {
+	out, err := json.Marshal(struct {
+		ChatID               int64   `json:"chat_id"`
+		AlertThreshold       float64 `json:"alert_threshold"`
+		ConnectFailThreshold float64 `json:"connect_fail_threshold"`
+		Timezone             string  `json:"timezone"`
+		HasToken             bool    `json:"has_token"`
+	}{
+		ChatID:               cfg.ChatID,
+		AlertThreshold:       orDefaultNum(cfg.AlertThreshold, 60),
+		ConnectFailThreshold: orDefaultNum(cfg.ConnectFailThreshold, 20),
+		Timezone:             cfg.Timezone,
+		HasToken:             cfg.Token != "",
+	})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	fmt.Println(string(out))
+	return 0
+}
+
+func orDefaultNum(v, def float64) float64 {
+	if v <= 0 {
+		return def
+	}
+	return v
 }
 
 func showConfig(cfg config.Config) {

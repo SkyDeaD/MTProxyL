@@ -1,23 +1,42 @@
 package mtproxylctl
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"os"
+	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 )
 
-// Бот-сторож ставится тем же CLI, что и бот-администратор, и панель относится
-// к нему так же: показывает состояние и дёргает подкоманды. Своего доступа к
-// /opt/mtproxyl-alertbot у неё нет — каталог принадлежит боту и закрыт.
+// Бот-сторож управляется напрямую, а не подкомандой MTProxyL, — и это
+// принципиально. Сторож ставится и поверх официального MTProxyL, где никакой
+// подкоманды `alertbot` нет и не будет: она живёт только в форке. Ходить туда
+// значило бы, что раздел панели работает у одних и молчит у других.
 //
-// Ботов два, а работает один: выбор хранит сам MTProxyL, поэтому панель его не
-// дублирует, а спрашивает.
+// Поэтому панель разговаривает с самим ботом: его бинарник умеет `config
+// show|set`, состояние службы спрашивается у systemd, а установка и удаление —
+// это тот же install-alertbot.sh, которым бот ставят из терминала.
 
-// ErrAlertbotUnsupported — установленный MTProxyL про сторожа ещё не знает.
-var ErrAlertbotUnsupported = errors.New("установленный MTProxyL не умеет управлять ботом-сторожем")
+const (
+	alertbotDir     = "/opt/mtproxyl-alertbot"
+	alertbotBin     = alertbotDir + "/mtproxyl-alertbot"
+	alertbotService = "mtproxyl-alertbot.service"
+	alertbotTimeout = 5 * time.Minute
+	// alertbotInstaller — тот же скрипт, которым бота ставят из терминала.
+	// Кладётся рядом с ботом при первой установке, чтобы панель не качала его
+	// из сети на каждое нажатие.
+	alertbotInstaller = alertbotDir + "/install-alertbot.sh"
+)
+
+// ErrAlertbotUnsupported — панель не может управлять сторожем: не хватает прав
+// sudo. Так бывает, если панель обновили, а права остались от прежней версии.
+var ErrAlertbotUnsupported = errors.New("панели не хватает прав для управления ботом-сторожем — переустановите её: mtproxyl panel install")
 
 // AlertbotConfig — настройки сторожа без токена: наружу токен не отдаётся
 // никогда, только признак, что он задан.
@@ -29,7 +48,8 @@ type AlertbotConfig struct {
 	HasToken             bool    `json:"has_token"`
 }
 
-// AlertbotStatus — `mtproxyl alertbot status --json`.
+// AlertbotStatus — то же, что панель показывает про бота-администратора, но
+// собранное из systemd и файла настроек.
 type AlertbotStatus struct {
 	Installed  bool           `json:"installed"`
 	Configured bool           `json:"configured"`
@@ -40,8 +60,7 @@ type AlertbotStatus struct {
 	Config     AlertbotConfig `json:"config"`
 }
 
-// AlertbotChatHint объясняет, что вписать в поле адреса. Текст здесь, а не во
-// фронтенде: панель и меню должны говорить одно и то же.
+// AlertbotChatHint объясняет, что вписать в поле адреса.
 func AlertbotChatHint() string {
 	return "Свой ID покажет @userinfobot. Можно указать группу или канал — " +
 		"тогда бот пишет туда; команд и клавиатуры там нет, а чтобы он мог " +
@@ -57,68 +76,77 @@ func ValidateChatID(id int64) error {
 }
 
 func (c *Client) AlertbotStatus(ctx context.Context) (*AlertbotStatus, error) {
-	out, err := c.run(ctx, "alertbot", "status", "--json")
+	st := &AlertbotStatus{Dir: alertbotDir, Service: alertbotService}
+
+	// Наличие бинарника проверяем сами: файл в чужом каталоге, но права на
+	// чтение самого файла не нужны — достаточно узнать, что он есть.
+	if _, err := os.Stat(alertbotBin); err == nil {
+		st.Installed = true
+	}
+	st.Active = systemctlQuiet(ctx, "is-active", alertbotService)
+	st.Enabled = systemctlQuiet(ctx, "is-enabled", alertbotService)
+
+	if !st.Installed {
+		return st, nil
+	}
+
+	// Настройки спрашиваем у самого бота: файл лежит с правами 600 у чужого
+	// пользователя, и читать его панели нечем — да и незачем, там токен.
+	out, err := c.runAlertbot(ctx, "config", "show", "--json")
 	if err != nil {
-		if unsupportedCommand(out, err) {
-			return nil, ErrAlertbotUnsupported
-		}
-		return nil, err
+		// Старый бот про --json не знает; это не повод прятать весь раздел.
+		return st, nil
 	}
-	var st AlertbotStatus
-	if err := json.Unmarshal([]byte(firstJSONLine(out)), &st); err != nil {
-		return nil, fmt.Errorf("состояние бота-сторожа не разобрано: %w", err)
+	var cfg AlertbotConfig
+	if err := json.Unmarshal([]byte(firstJSONLine(out)), &cfg); err == nil {
+		st.Config = cfg
+		st.Configured = cfg.HasToken
 	}
-	return &st, nil
+	return st, nil
 }
 
 func (c *Client) AlertbotLogs(ctx context.Context, lines int) (string, error) {
 	if lines <= 0 {
 		lines = 100
 	}
-	out, err := c.run(ctx, "alertbot", "logs", "--json", strconv.Itoa(lines))
+	if lines > 500 {
+		lines = 500
+	}
+	out, err := c.sudo(ctx, 30*time.Second, "journalctl", "-u", alertbotService,
+		"-n", strconv.Itoa(lines), "--no-pager")
 	if err != nil {
-		if unsupportedCommand(out, err) {
-			return "", ErrAlertbotUnsupported
-		}
 		return "", err
 	}
-	var payload struct {
-		Lines string `json:"lines"`
-	}
-	if err := json.Unmarshal([]byte(firstJSONLine(out)), &payload); err != nil {
-		return "", fmt.Errorf("журнал не разобран: %w", err)
-	}
-	return payload.Lines, nil
+	return out, nil
 }
 
-// AlertbotInstall ставит сторожа. Пустой токен допустим при переустановке —
-// тогда скрипт берёт прежний из своего конфига.
+// AlertbotInstall ставит или переустанавливает сторожа тем же скриптом, что и
+// установка из терминала: два разных пути установки разошлись бы в первый же
+// месяц.
 func (c *Client) AlertbotInstall(ctx context.Context, token string, chat int64) (string, error) {
-	args := []string{"alertbot", "install"}
-	if token != "" {
-		args = append(args, "--token", token)
-	}
-	if chat != 0 {
-		args = append(args, "--chat", strconv.FormatInt(chat, 10))
-	}
-	return c.run(ctx, args...)
+	args := []string{alertbotInstaller, "--token", token, "--chat", strconv.FormatInt(chat, 10)}
+	return c.sudo(ctx, alertbotTimeout, "sh", args...)
 }
 
 func (c *Client) AlertbotService(ctx context.Context, action string) (string, error) {
 	switch action {
-	case "start", "stop", "restart", "update":
+	case "start", "stop", "restart":
+		return c.sudo(ctx, time.Minute, "systemctl", action, alertbotService)
+	case "update":
+		// Обновление — та же установка: скрипт перекачает бинарник, а конфиг
+		// с id живого сообщения не тронет.
+		return c.sudo(ctx, alertbotTimeout, "sh", alertbotInstaller)
 	default:
 		return "", fmt.Errorf("неизвестное действие: %s", action)
 	}
-	return c.run(ctx, "alertbot", action)
 }
 
 func (c *Client) AlertbotUninstall(ctx context.Context) (string, error) {
-	return c.run(ctx, "alertbot", "uninstall", "--yes")
+	return c.sudo(ctx, time.Minute, "sh", alertbotInstaller, "--uninstall")
 }
 
 // alertbotSettable — что панели позволено менять. Белый список, а не свободный
-// ключ: настройки уходят в CLI, и произвольная строка там ни к чему.
+// ключ: значение уходит в чужой процесс.
 var alertbotSettable = map[string]string{
 	"alert_threshold":        "percent",
 	"connect_fail_threshold": "percent",
@@ -131,14 +159,15 @@ func (c *Client) AlertbotSet(ctx context.Context, key, value string) (string, er
 	if !ok {
 		return "", fmt.Errorf("неизвестная настройка: %s", key)
 	}
+	value = strings.TrimSpace(value)
 	switch kind {
 	case "percent":
-		n, err := strconv.Atoi(strings.TrimSpace(value))
+		n, err := strconv.Atoi(value)
 		if err != nil || n < 1 || n > 99 {
 			return "", fmt.Errorf("порог задаётся числом от 1 до 99")
 		}
 	case "chat":
-		n, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+		n, err := strconv.ParseInt(value, 10, 64)
 		if err != nil {
 			return "", fmt.Errorf("ID чата — целое число")
 		}
@@ -147,8 +176,53 @@ func (c *Client) AlertbotSet(ctx context.Context, key, value string) (string, er
 		}
 	case "zone":
 		// Пусто — «определять самому», это законный выбор. Имя зоны проверяет
-		// скрипт: у него под рукой /usr/share/zoneinfo, а у панели может не
-		// быть — она вправе жить в контейнере без tzdata.
+		// сам бот: у него под рукой встроенная база часовых поясов.
 	}
-	return c.run(ctx, "alertbot", "set", key, value)
+	return c.runAlertbot(ctx, "config", "set", key, value)
+}
+
+// runAlertbot зовёт бинарник сторожа.
+func (c *Client) runAlertbot(ctx context.Context, args ...string) (string, error) {
+	return c.sudo(ctx, time.Minute, alertbotBin, args...)
+}
+
+// sudo запускает команду от root по поимённому списку в sudoers панели.
+// Отдельно от run(): тот прибит к скрипту MTProxyL, а сторож живёт сам по себе.
+func (c *Client) sudo(ctx context.Context, timeout time.Duration, name string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	full := append([]string{"-n", name}, args...)
+	cmd := exec.CommandContext(ctx, "sudo", full...)
+	cmd.Env = []string{"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"}
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if sink := progressFrom(ctx); sink != nil {
+		cmd.Stdout = io.MultiWriter(&stdout, sink)
+		cmd.Stderr = io.MultiWriter(&stderr, sink)
+	}
+
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return stdout.String(), fmt.Errorf("%s: не ответил за %s", name, timeout)
+		}
+		detail := lastMeaningfulLine(stderr.String(), stdout.String())
+		// «a password is required» и «not allowed» означают одно: правила sudo
+		// у панели старше её самой.
+		if strings.Contains(detail, "password is required") || strings.Contains(detail, "not allowed") {
+			return stdout.String(), ErrAlertbotUnsupported
+		}
+		if detail == "" {
+			detail = err.Error()
+		}
+		return stdout.String(), fmt.Errorf("%s: %s", name, detail)
+	}
+	return stdout.String(), nil
+}
+
+func systemctlQuiet(ctx context.Context, verb, unit string) bool {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	return exec.CommandContext(ctx, "systemctl", verb, "--quiet", unit).Run() == nil
 }

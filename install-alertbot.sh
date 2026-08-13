@@ -13,6 +13,7 @@
 set -eu
 
 REPO="${ALERTBOT_REPO:-SkyDeaD/MTProxyL}"
+INSTALLER_BRANCH="${ALERTBOT_BRANCH:-tg-testing}"
 MTPROXYL_DIR="${MTPROXYL_DIR:-/opt/mtproxyl}"
 SCRIPT="${MTPROXYL_SCRIPT:-${MTPROXYL_DIR}/mtproxyl.sh}"
 SETTINGS="${MTPROXYL_SETTINGS:-${MTPROXYL_DIR}/settings.conf}"
@@ -67,12 +68,15 @@ uninstall() {
 
 TOKEN="${TOKEN:-}"
 CHAT="${CHAT:-}"
+WITH_PANEL="${WITH_PANEL:-yes}"
 while [ $# -gt 0 ]; do
     case "$1" in
         --uninstall|--rollback) uninstall ;;
         --token) TOKEN="$2"; shift 2 ;;
         --chat)  CHAT="$2";  shift 2 ;;
         --repo)  REPO="$2";  shift 2 ;;
+        --branch) INSTALLER_BRANCH="$2"; shift 2 ;;
+        --no-panel) WITH_PANEL="no"; shift ;;
         *) shift ;;
     esac
 done
@@ -200,6 +204,17 @@ fi
 mkdir -p "$DIR"
 install -m 0755 "$FOUND" "$BIN"
 
+# Копию себя кладём рядом: панель нажимает «Установить» и «Обновить» этим же
+# скриптом, а качать его из сети на каждое нажатие незачем — да и права sudo
+# проще выдать на конкретный файл, чем на «что угодно из интернета».
+if [ -f "$0" ] && [ "$0" != "${DIR}/install-alertbot.sh" ]; then
+    install -m 0755 "$0" "${DIR}/install-alertbot.sh" 2>/dev/null || true
+elif [ ! -f "${DIR}/install-alertbot.sh" ]; then
+    # Скрипт пришёл по трубе, файла нет — скачиваем копию.
+    curl -fsSL "https://raw.githubusercontent.com/${REPO}/${INSTALLER_BRANCH}/install-alertbot.sh" \
+        -o "${DIR}/install-alertbot.sh" 2>/dev/null && chmod 0755 "${DIR}/install-alertbot.sh" || true
+fi
+
 # Права урезаны до трёх подкоманд чтения: сторож не запускает прокси и не
 # трогает пользователей, поэтому и разрешений на это не просит.
 cat > "${TMP}/sudoers" << EOF
@@ -276,6 +291,26 @@ if systemctl is-active "$SERVICE" >/dev/null 2>&1; then
     ok "Бот-сторож работает"
 else
     warn "служба не поднялась — посмотрите: journalctl -u ${SERVICE} -n 50"
+fi
+
+# Раздел «Телеграм-бот» в панели знает про сторожа только у форкнутой панели:
+# официальная про него не слышала. Ставим её тем же заходом, если панель вообще
+# установлена, — иначе человеку пришлось бы выполнять вторую команду, о которой
+# он не догадывается.
+if [ "$WITH_PANEL" != "no" ] && [ -x /usr/local/bin/mtproxyl-panel ]; then
+    say ""
+    say "Обновляю панель до сборки с разделом бота-сторожа"
+    _pan=$(mktemp)
+    if curl -fsSL "https://raw.githubusercontent.com/${REPO}/${INSTALLER_BRANCH}/mtproxyl-panel/install.sh" -o "$_pan" 2>/dev/null; then
+        if MTPROXYL_PANEL_REPO="$REPO" sh "$_pan" install >/dev/null 2>&1; then
+            ok "Панель обновлена — раздел «Телеграм-бот» знает про сторожа"
+        else
+            warn "панель обновить не удалось: sh $_pan install"
+        fi
+    else
+        warn "установщик панели не скачался — раздел в панели останется прежним"
+    fi
+    rm -f "$_pan"
 fi
 
 say ""

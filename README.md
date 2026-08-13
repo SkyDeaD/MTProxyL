@@ -697,11 +697,15 @@ mtproxyl alertbot uninstall
 #### Как ставить: два пути
 
 **Путь 1 — поверх обычного MTProxyL.** Работает с официальной версией 1.4.8 и
-новее, форк ставить не нужно:
+новее, форк ставить не нужно, команда одна:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/SkyDeaD/MTProxyL/tg-testing/install-alertbot.sh | sh
+curl -fsSL https://raw.githubusercontent.com/SkyDeaD/MTProxyL/tg-testing/install-alertbot.sh | sudo sh
 ```
+
+Она ставит службу сторожа и заодно обновляет панель до сборки, которая знает
+про него, — там появится раздел с переключателем между ботом-администратором и
+сторожем. Если панель трогать не нужно, добавьте `--no-panel`.
 
 Установщик заводит отдельную службу, пользователя без прав и права `sudo`
 ровно на три подкоманды чтения. От файлов MTProxyL сторож не зависит, поэтому
@@ -716,14 +720,17 @@ mtproxyl-alertbot config set timezone Asia/Tashkent
 mtproxyl-alertbot config set chat_id -1001234567890
 ```
 
-Цена этого пути: пункта «Телеграм бот» в меню MTProxyL и раздела в панели у
-сторожа не будет — они живут в форке.
+Цена этого пути: пункта «Телеграм бот» в меню самого MTProxyL не будет —
+подкоманды живут в форке, и первое же `mtproxyl update` их бы всё равно унесло.
+Раздел в панели при этом есть: панель разговаривает со сторожем напрямую, без
+подкоманд MTProxyL.
 
 **Путь 2 — форк целиком.** Тогда появляются и меню, и выбор бота, и раздел в
 панели:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/SkyDeaD/MTProxyL/main/install.sh | sh -s -- --repo SkyDeaD/MTProxyL
+curl -fsSL https://raw.githubusercontent.com/SkyDeaD/MTProxyL/main/install.sh \
+  | sudo sh -s -- --repo SkyDeaD/MTProxyL
 ```
 
 Репозиторий запоминается в `/opt/mtproxyl/.repo`, и `mtproxyl update` дальше

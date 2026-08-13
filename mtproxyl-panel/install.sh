@@ -2,7 +2,10 @@
 set -eu
 
 # ── Constants ────────────────────────────────────────────────────────────────
-REPO="Liafanx/MTProxyL"
+# Репозиторий, из которого качаются релизы панели. Переопределяется
+# переменной окружения: форк выпускает свои сборки, и без этого установка из
+# форка приносила бы официальную панель — то есть тихо не то, что просили.
+REPO="${MTPROXYL_PANEL_REPO:-Liafanx/MTProxyL}"
 # Панель живёт в репозитории MTProxyL, но выпускается отдельно — её релизы
 # помечаются собственным префиксом тега.
 RELEASE_TAG_PREFIX="mtproxyl-panel-v"
@@ -581,6 +584,26 @@ $SYSTEM_USER ALL=(root) NOPASSWD: $_script tgbot uninstall --yes
 $SYSTEM_USER ALL=(root) NOPASSWD: $_script tgbot admin-add [0-9]*
 $SYSTEM_USER ALL=(root) NOPASSWD: $_script tgbot admin-rm [0-9]*
 $SYSTEM_USER ALL=(root) NOPASSWD: $_script tgbot set [a-z]*.[a-z_]* *
+
+# Бот-сторож. Он живёт своей службой и подкоманд MTProxyL не имеет — панель
+# разговаривает с ним напрямую. Права поимённые: запуск службы, чтение
+# журнала, настройки его же бинарником и установка тем самым скриптом,
+# которым его ставят из терминала.
+$SYSTEM_USER ALL=(root) NOPASSWD: /bin/systemctl start mtproxyl-alertbot.service
+$SYSTEM_USER ALL=(root) NOPASSWD: /bin/systemctl stop mtproxyl-alertbot.service
+$SYSTEM_USER ALL=(root) NOPASSWD: /bin/systemctl restart mtproxyl-alertbot.service
+$SYSTEM_USER ALL=(root) NOPASSWD: /bin/systemctl is-active --quiet mtproxyl-alertbot.service
+$SYSTEM_USER ALL=(root) NOPASSWD: /bin/systemctl is-enabled --quiet mtproxyl-alertbot.service
+$SYSTEM_USER ALL=(root) NOPASSWD: /usr/bin/systemctl start mtproxyl-alertbot.service
+$SYSTEM_USER ALL=(root) NOPASSWD: /usr/bin/systemctl stop mtproxyl-alertbot.service
+$SYSTEM_USER ALL=(root) NOPASSWD: /usr/bin/systemctl restart mtproxyl-alertbot.service
+$SYSTEM_USER ALL=(root) NOPASSWD: /bin/journalctl -u mtproxyl-alertbot.service -n [0-9]* --no-pager
+$SYSTEM_USER ALL=(root) NOPASSWD: /usr/bin/journalctl -u mtproxyl-alertbot.service -n [0-9]* --no-pager
+$SYSTEM_USER ALL=(root) NOPASSWD: /opt/mtproxyl-alertbot/mtproxyl-alertbot config show --json
+$SYSTEM_USER ALL=(root) NOPASSWD: /opt/mtproxyl-alertbot/mtproxyl-alertbot config set [a-z_]* *
+$SYSTEM_USER ALL=(root) NOPASSWD: /bin/sh /opt/mtproxyl-alertbot/install-alertbot.sh
+$SYSTEM_USER ALL=(root) NOPASSWD: /bin/sh /opt/mtproxyl-alertbot/install-alertbot.sh --token [0-9]* --chat *
+$SYSTEM_USER ALL=(root) NOPASSWD: /bin/sh /opt/mtproxyl-alertbot/install-alertbot.sh --uninstall
 EOF
 
   if [ -n "$_visudo" ]; then
