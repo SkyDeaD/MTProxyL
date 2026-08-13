@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -78,25 +77,22 @@ func ValidateChatID(id int64) error {
 func (c *Client) AlertbotStatus(ctx context.Context) (*AlertbotStatus, error) {
 	st := &AlertbotStatus{Dir: alertbotDir, Service: alertbotService}
 
-	// Наличие бинарника проверяем сами: файл в чужом каталоге, но права на
-	// чтение самого файла не нужны — достаточно узнать, что он есть.
-	if _, err := os.Stat(alertbotBin); err == nil {
-		st.Installed = true
-	}
 	st.Active = systemctlQuiet(ctx, "is-active", alertbotService)
 	st.Enabled = systemctlQuiet(ctx, "is-enabled", alertbotService)
 
-	if !st.Installed {
-		return st, nil
-	}
-
-	// Настройки спрашиваем у самого бота: файл лежит с правами 600 у чужого
-	// пользователя, и читать его панели нечем — да и незачем, там токен.
+	// «Установлен» выясняется разговором с самим ботом, а не os.Stat по его
+	// файлу: каталог сторожа принадлежит его собственному пользователю и
+	// закрыт правами 750, поэтому панель туда даже заглянуть не может — и
+	// честно установленный бот выглядел бы отсутствующим.
 	out, err := c.runAlertbot(ctx, "config", "show", "--json")
 	if err != nil {
-		// Старый бот про --json не знает; это не повод прятать весь раздел.
+		// Ответ службы важнее: если она работает, бот установлен, а спросить
+		// настройки помешало что-то другое — права sudo, например.
+		st.Installed = st.Active || st.Enabled
 		return st, nil
 	}
+	st.Installed = true
+
 	var cfg AlertbotConfig
 	if err := json.Unmarshal([]byte(firstJSONLine(out)), &cfg); err == nil {
 		st.Config = cfg
