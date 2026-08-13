@@ -19,16 +19,13 @@ import (
 	"github.com/Liafanx/mtproxyl-panel/internal/auth"
 	"github.com/Liafanx/mtproxyl-panel/internal/auto_update"
 	"github.com/Liafanx/mtproxyl-panel/internal/config"
-	"github.com/Liafanx/mtproxyl-panel/internal/globalping"
 	"github.com/Liafanx/mtproxyl-panel/internal/logs"
 	"github.com/Liafanx/mtproxyl-panel/internal/mtproxylctl"
 	"github.com/Liafanx/mtproxyl-panel/internal/panel_updater"
 	"github.com/Liafanx/mtproxyl-panel/internal/proxy"
 	"github.com/Liafanx/mtproxyl-panel/internal/spa"
 	"github.com/Liafanx/mtproxyl-panel/internal/telemt_config"
-	"github.com/Liafanx/mtproxyl-panel/internal/tgbot"
 	"github.com/Liafanx/mtproxyl-panel/internal/updater"
-	"github.com/Liafanx/mtproxyl-panel/internal/uplink"
 	"github.com/Liafanx/mtproxyl-panel/internal/ws"
 )
 
@@ -97,18 +94,6 @@ func (rl *loginRateLimiter) record(ip string) {
 
 type Server struct {
 	cfg *config.Config
-	// availability is the «Доступность из России» checker; nil when it is
-	// turned off in the config.
-	availability *globalping.Checker
-	// availabilityOverride is the operator's answer to what should be checked.
-	availabilityOverride *availabilityOverrideStore
-	// telegramStore — настройки бота и его память между перезапусками.
-	telegramStore *telegramBotStore
-	// telegram зеркалит вердикт проверки в личку админа; nil, когда сама
-	// проверка выключена в конфиге — тогда боту нечего сообщать.
-	telegram *tgbot.Bot
-	// uplink наблюдает за исходящей связью прокси с дата-центрами Telegram.
-	uplink *uplink.Watcher
 }
 
 func New(cfg *config.Config) *Server {
@@ -431,9 +416,6 @@ func (s *Server) Run(version string, distFS fs.FS) error {
 
 	// Доступность прокси из России глазами обычных пользователей
 	s.registerAvailabilityRoutes(mux, jwtSecret, mtproxylctl.New(s.cfg.Mtproxyl))
-
-	// Тот же вердикт, но в личке админа в Telegram
-	s.registerTelegramRoutes(mux, jwtSecret)
 
 	// Telemt service restart endpoint
 	mux.Handle("POST /api/telemt/restart", auth.RequireAuth(jwtSecret, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

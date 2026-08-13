@@ -86,8 +86,11 @@ toml_value() {
       if (current_key == key) {
         value = substr(line, index(line, "=") + 1)
         gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
-        gsub(/^"/, "", value)
-        gsub(/"$/, "", value)
+        # Одинарные кавычки в TOML — такая же строка, как двойные (литеральная).
+        # Мы их не пишем, но конфиг правят и руками, а неснятая кавычка потом
+        # уезжает в sudoers, и visudo отвергает файл целиком.
+        gsub(/^"|"$/, "", value)
+        gsub(/^'"'"'|'"'"'$/, "", value)
         print value
         exit
       }
@@ -441,6 +444,20 @@ install_mtproxyl_sudoers() {
   [ -n "$_script" ] || _script="/opt/mtproxyl/mtproxyl.sh"
   [ -n "$_install_dir" ] || _install_dir="/opt/mtproxyl"
 
+  # Пути идут в sudoers как есть, а он принимает только абсолютный путь без
+  # пробелов и кавычек. Проверяем здесь: иначе visudo забракует сотню строк
+  # разом, и в этом потоке не разглядеть, что виноват один ключ конфига.
+  for _p in "$_script:script_path" "$_install_dir:install_dir"; do
+    _v=${_p%:*}; _k=${_p##*:}
+    if [ -n "$(printf '%s' "$_v" | tr -d 'A-Za-z0-9/._-')" ]; then
+      die "В $CONFIG_FILE ключ mtproxyl.$_k = $_v — кавычки, пробелы и прочие лишние знаки в пути sudoers не принимает"
+    fi
+    case "$_v" in
+      /*) ;;
+      *) die "В $CONFIG_FILE ключ mtproxyl.$_k = $_v — нужен абсолютный путь" ;;
+    esac
+  done
+
   _visudo=$(command -v visudo 2>/dev/null || true)
 
   say "Установка прав sudo для команд MTProxyL..."
@@ -542,6 +559,28 @@ $SYSTEM_USER ALL=(root) NOPASSWD: $_script pq-check [A-Za-z0-9]*
 # скрипт заканчивает работу exec в интерактивное меню.
 $SYSTEM_USER ALL=(root) NOPASSWD: $_script update-check
 $SYSTEM_USER ALL=(root) NOPASSWD: $_script update --no-restart
+# Доступность из России. Проверку ведёт MTProxyL — тем же результатом
+# пользуются телеграм-бот и меню, а панель только показывает и просит проверить.
+$SYSTEM_USER ALL=(root) NOPASSWD: $_script availability status --json
+$SYSTEM_USER ALL=(root) NOPASSWD: $_script availability details
+$SYSTEM_USER ALL=(root) NOPASSWD: $_script availability check --json
+$SYSTEM_USER ALL=(root) NOPASSWD: $_script availability on
+$SYSTEM_USER ALL=(root) NOPASSWD: $_script availability off
+$SYSTEM_USER ALL=(root) NOPASSWD: $_script availability token *
+# Телеграм-бот. Токен передаётся аргументом установки, поэтому правило на неё
+# отдельное и с ним же ограничен формат: только то, что похоже на токен.
+$SYSTEM_USER ALL=(root) NOPASSWD: $_script tgbot status --json
+$SYSTEM_USER ALL=(root) NOPASSWD: $_script tgbot logs --json [0-9]*
+$SYSTEM_USER ALL=(root) NOPASSWD: $_script tgbot install --token [0-9]* --admin [0-9]*
+$SYSTEM_USER ALL=(root) NOPASSWD: $_script tgbot install
+$SYSTEM_USER ALL=(root) NOPASSWD: $_script tgbot update
+$SYSTEM_USER ALL=(root) NOPASSWD: $_script tgbot start
+$SYSTEM_USER ALL=(root) NOPASSWD: $_script tgbot stop
+$SYSTEM_USER ALL=(root) NOPASSWD: $_script tgbot restart
+$SYSTEM_USER ALL=(root) NOPASSWD: $_script tgbot uninstall --yes
+$SYSTEM_USER ALL=(root) NOPASSWD: $_script tgbot admin-add [0-9]*
+$SYSTEM_USER ALL=(root) NOPASSWD: $_script tgbot admin-rm [0-9]*
+$SYSTEM_USER ALL=(root) NOPASSWD: $_script tgbot set [a-z]*.[a-z_]* *
 EOF
 
   if [ -n "$_visudo" ]; then
