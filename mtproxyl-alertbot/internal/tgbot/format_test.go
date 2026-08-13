@@ -442,7 +442,6 @@ func TestRenderStatusHasUplinkBlock(t *testing.T) {
 		"отброшено ретраев",
 		"DC 1",
 		"142 мс",
-		"Движок: 1.2.3",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("в блоке связи нет %q\n---\n%s", want, out)
@@ -947,7 +946,7 @@ func TestRenderStatusUplinkShowsAgeAndInterval(t *testing.T) {
 	if !strings.Contains(out, "3 мин назад") {
 		t.Errorf("в блоке связи нет возраста цифр:\n%s", out)
 	}
-	if !strings.Contains(out, "наблюдение раз в 1 мин") {
+	if !strings.Contains(out, "опрос раз в 1 мин") {
 		t.Errorf("в блоке связи не сказано, как часто он обновляется:\n%s", out)
 	}
 }
@@ -959,5 +958,60 @@ func TestRenderStatusUplinkOmitsIntervalWhenUnknown(t *testing.T) {
 
 	if out := RenderStatus(v); strings.Contains(out, "наблюдение раз в") {
 		t.Errorf("частота напечатана, хотя её никто не сообщал:\n%s", out)
+	}
+}
+
+// ── Порядок разделов ────────────────────────────────────────────────────────
+
+// Сообщение читают сверху вниз, и разделы должны идти в осмысленном порядке:
+// сначала вердикт доступности и его же зонды, потом связь с дата-центрами,
+// потом нагрузка. Раньше зонды печатались последними — ради бюджета, — и
+// отрывались от собственного вердикта двумя чужими разделами.
+func TestRenderStatusSectionOrder(t *testing.T) {
+	v := baseView(sampleResult(20, 19))
+	u := liveUplink()
+	u.Connections, u.ConnectionsBad = 8625, 143
+	u.ActiveIPs, u.TrafficOct = 353, 834000000
+	v.Uplink = u
+
+	out := RenderStatus(v)
+
+	order := []string{"Доступность из РФ", "Зонды", "Связь с Telegram", "Нагрузка"}
+	at := -1
+	for _, part := range order {
+		i := strings.Index(out, part)
+		if i < 0 {
+			t.Fatalf("в сообщении нет раздела %q\n---\n%s", part, out)
+		}
+		if i < at {
+			t.Errorf("раздел %q оказался выше предыдущего\n---\n%s", part, out)
+		}
+		at = i
+	}
+}
+
+// Telegram склеивает соседние кодовые блоки: перевод строки после </pre> он
+// съедает. Без текстовой подписи между ними «Трафик 795.4 МБ» и «TLS
+// handshake — bad client» оказывались в одной строке — это видели на живом
+// сообщении.
+func TestRenderStatusSeparatesAdjacentTables(t *testing.T) {
+	v := baseView(sampleResult(2, 2))
+	u := liveUplink()
+	u.Connections, u.ConnectionsBad = 8625, 143
+	u.TrafficOct = 834000000
+	u.HandshakeFails = 516
+	u.BadClasses = []uplink.ClassCount{{Class: "tls_handshake_bad_client", Count: 94}}
+	u.HandshakeClasses = []uplink.ClassCount{{Class: "timeout", Count: 32}}
+	v.Uplink = u
+
+	out := RenderStatus(v)
+
+	if strings.Contains(out, "</code></pre><pre>") {
+		t.Errorf("таблицы идут вплотную — в чате они склеятся:\n%s", out)
+	}
+	for _, want := range []string{"<b>Ошибки соединений</b>", "<b>Сбои рукопожатия</b>"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("нет подписи %q перед таблицей:\n%s", want, out)
+		}
 	}
 }
