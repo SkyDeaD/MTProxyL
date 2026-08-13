@@ -9,7 +9,8 @@ import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { OperationProgress } from '@/components/OperationProgress';
 import { StatusDot } from '@/components/StatusDot';
 import { useManagerOnly, useMtproxylOperation } from '@/hooks/useMtproxyl';
-import { tgbotApi, type TgbotStatus } from '@/lib/api';
+import { alertbotApi, tgbotApi, type TgbotStatus } from '@/lib/api';
+import { AlertbotPanel } from '@/pages/AlertbotPage';
 import { cn } from '@/lib/utils';
 
 const NOTIFY_LABELS: Array<[string, string]> = [
@@ -40,6 +41,13 @@ export function TgbotPage() {
   const [busy, setBusy] = useState(false);
   const [logs, setLogs] = useState('');
   const [confirmRemove, setConfirmRemove] = useState(false);
+  // Ботов два, а работает один, поэтому здесь переключатель вида, а не две
+  // страницы: человек приходит с вопросом «что у меня с ботом», а не «что у
+  // меня с конкретной службой».
+  const [variant, setVariant] = useState<'admin' | 'alert'>('admin');
+  // Угадываем вариант ровно один раз, при первом заходе: дальше человек мог
+  // переключиться руками, и переставлять под ним экран нельзя.
+  const [variantPinned, setVariantPinned] = useState(false);
 
   const [token, setToken] = useState('');
   const [admin, setAdmin] = useState('');
@@ -66,6 +74,23 @@ export function TgbotPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (variantPinned || status?.installed) {
+      return;
+    }
+    // Бота-администратора нет — возможно, стоит сторож. Спрашиваем и
+    // показываем сразу его, чтобы не заставлять искать.
+    void alertbotApi
+      .status()
+      .then((res) => {
+        if (res.status?.installed) {
+          setVariant('alert');
+        }
+      })
+      .catch(() => undefined)
+      .finally(() => setVariantPinned(true));
+  }, [status, variantPinned]);
 
   const act = async (fn: () => Promise<unknown>) => {
     setBusy(true);
@@ -97,6 +122,46 @@ export function TgbotPage() {
   const configured = status?.configured ?? false;
   const canInstall = configured || (token.trim() !== '' && admin.trim() !== '');
 
+  const switcher = (
+    <div className="flex gap-2">
+      <Button
+        size="sm"
+        variant={variant === 'admin' ? 'default' : 'outline'}
+        onClick={() => {
+          setVariant('admin');
+          setVariantPinned(true);
+        }}
+      >
+        Бот-администратор
+      </Button>
+      <Button
+        size="sm"
+        variant={variant === 'alert' ? 'default' : 'outline'}
+        onClick={() => {
+          setVariant('alert');
+          setVariantPinned(true);
+        }}
+      >
+        Бот-сторож
+      </Button>
+    </div>
+  );
+
+  if (variant === 'alert') {
+    return (
+      <div className="space-y-4">
+        <PageTitle />
+        {switcher}
+        <p className="text-xs text-text-secondary">
+          Сторож не управляет прокси: он держит в чате одно живое сообщение и будит звуком,
+          когда прокси перестал работать — снаружи или изнутри. Включённым может быть только
+          один бот, поэтому установка сторожа остановит бота-администратора.
+        </p>
+        <AlertbotPanel />
+      </div>
+    );
+  }
+
   if (!supported) {
     return (
       <div className="space-y-4">
@@ -109,6 +174,7 @@ export function TgbotPage() {
   return (
     <div className="space-y-4">
       <PageTitle />
+      {switcher}
       {error && <ErrorAlert message={error} onRetry={() => void load()} />}
       <OperationProgress operation={operation} onDismiss={dismiss} />
 

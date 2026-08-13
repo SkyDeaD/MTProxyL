@@ -1194,4 +1194,160 @@ func (s *Server) registerMtproxylRoutes(mux *http.ServeMux, jwtSecret []byte) {
 		}
 		tgbotStatus(w, r)
 	}))
+
+	// ── Бот-сторож ──────────────────────────────────────────────────────────
+	// Второй вариант бота: только наблюдение, зато в обе стороны. Ставится тем
+	// же CLI и такими же ручками, что бот-администратор, — человеку незачем
+	// знать, что внутри у одного питон, а у другого бинарник.
+	alertbotStatus := func(w http.ResponseWriter, r *http.Request) {
+		st, err := client.AlertbotStatus(r.Context())
+		if err != nil {
+			if errors.Is(err, mtproxylctl.ErrAlertbotUnsupported) {
+				writeJSON(w, http.StatusOK, jsonResponse{OK: true, Data: map[string]any{
+					"supported": false,
+					"message": "Установленный MTProxyL не умеет управлять ботом-сторожем — " +
+						"обновите его: mtproxyl update",
+				}})
+				return
+			}
+			writeCLIError(w, "mtproxyl_error", err)
+			return
+		}
+		writeJSON(w, http.StatusOK, jsonResponse{OK: true, Data: map[string]any{
+			"supported": true,
+			"status":    st,
+			"hint":      mtproxylctl.AlertbotChatHint(),
+			"operation": runner.Status(),
+		}})
+	}
+
+	mux.Handle("GET /api/alertbot/status", protected(func(w http.ResponseWriter, r *http.Request) {
+		if !guard(w) {
+			return
+		}
+		alertbotStatus(w, r)
+	}))
+
+	mux.Handle("GET /api/alertbot/logs", protected(func(w http.ResponseWriter, r *http.Request) {
+		if !guard(w) {
+			return
+		}
+		lines, _ := strconv.Atoi(r.URL.Query().Get("lines"))
+		out, err := client.AlertbotLogs(r.Context(), lines)
+		if err != nil {
+			if errors.Is(err, mtproxylctl.ErrAlertbotUnsupported) {
+				writeJSON(w, http.StatusOK, jsonResponse{OK: true, Data: map[string]string{"lines": ""}})
+				return
+			}
+			writeCLIError(w, "mtproxyl_error", err)
+			return
+		}
+		writeJSON(w, http.StatusOK, jsonResponse{OK: true, Data: map[string]string{"lines": out}})
+	}))
+
+	// Установка качает бинарник из релиза и сверяет контрольную сумму — это
+	// секунды, а не минуты, но уходит в тот же раннер: другая операция
+	// MTProxyL в это время всё равно идти не должна.
+	mux.Handle("POST /api/alertbot/install", protected(func(w http.ResponseWriter, r *http.Request) {
+		if !guard(w) || busy(w) {
+			return
+		}
+		var body struct {
+			Token string `json:"token"`
+			Chat  int64  `json:"chat"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&body); err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", "Не удалось разобрать запрос")
+			return
+		}
+		token := strings.TrimSpace(body.Token)
+		if token != "" {
+			if err := mtproxylctl.ValidateTgbotToken(token); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid_token", err.Error())
+				return
+			}
+			if err := mtproxylctl.ValidateChatID(body.Chat); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid_chat", err.Error())
+				return
+			}
+		} else {
+			// Пустые поля — «переустановить с прежним токеном». Если прежнего
+			// нет, скрипту пришлось бы спрашивать, а терминала у него тут не
+			// будет: отказываем сразу и объясняем.
+			st, err := client.AlertbotStatus(r.Context())
+			if err != nil {
+				writeCLIError(w, "mtproxyl_error", err)
+				return
+			}
+			if !st.Configured {
+				writeError(w, http.StatusBadRequest, "token_required",
+					"Бот ещё не настроен: укажите токен от @BotFather и ID чата")
+				return
+			}
+		}
+		started := runner.Start("alertbot:install", func(ctx context.Context) (string, error) {
+			return client.AlertbotInstall(ctx, token, body.Chat)
+		})
+		if !started {
+			writeError(w, http.StatusConflict, "operation_busy",
+				"Другая операция MTProxyL уже выполняется")
+			return
+		}
+		writeJSON(w, http.StatusAccepted, jsonResponse{OK: true, Data: runner.Status()})
+	}))
+
+	mux.Handle("POST /api/alertbot/service", protected(func(w http.ResponseWriter, r *http.Request) {
+		if !guard(w) || busy(w) {
+			return
+		}
+		var body struct {
+			Action string `json:"action"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10)).Decode(&body); err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", "Не удалось разобрать запрос")
+			return
+		}
+		out, err := client.AlertbotService(r.Context(), strings.TrimSpace(body.Action))
+		if err != nil {
+			writeCLIError(w, "mtproxyl_error", err)
+			return
+		}
+		writeJSON(w, http.StatusOK, jsonResponse{OK: true, Data: map[string]string{"output": out}})
+	}))
+
+	mux.Handle("POST /api/alertbot/uninstall", protected(func(w http.ResponseWriter, r *http.Request) {
+		if !guard(w) || busy(w) {
+			return
+		}
+		out, err := client.AlertbotUninstall(r.Context())
+		if err != nil {
+			writeCLIError(w, "mtproxyl_error", err)
+			return
+		}
+		writeJSON(w, http.StatusOK, jsonResponse{OK: true, Data: map[string]string{"output": out}})
+	}))
+
+	mux.Handle("PUT /api/alertbot/settings", protected(func(w http.ResponseWriter, r *http.Request) {
+		if !guard(w) || busy(w) {
+			return
+		}
+		var body struct {
+			Key   string `json:"key"`
+			Value string `json:"value"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10)).Decode(&body); err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", "Не удалось разобрать запрос")
+			return
+		}
+		if _, err := client.AlertbotSet(r.Context(), strings.TrimSpace(body.Key), strings.TrimSpace(body.Value)); err != nil {
+			var ce *mtproxylctl.CommandError
+			if errors.As(err, &ce) {
+				writeCLIError(w, "mtproxyl_error", err)
+				return
+			}
+			writeError(w, http.StatusBadRequest, "invalid_setting", err.Error())
+			return
+		}
+		alertbotStatus(w, r)
+	}))
 }

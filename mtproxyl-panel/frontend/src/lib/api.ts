@@ -713,3 +713,61 @@ export const tgbotApi = {
       body: JSON.stringify({ key, value }),
     }),
 };
+
+// ── Бот-сторож ──────────────────────────────────────────────────────────────
+// Второй вариант бота. Ставится и настраивается тем же способом, что и
+// бот-администратор, поэтому и клиент здесь такой же формы.
+
+export interface AlertbotConfig {
+  /** Личка, группа или канал — у групп и каналов id отрицательный. */
+  chat_id: number;
+  alert_threshold: number;
+  connect_fail_threshold: number;
+  /** Пусто — зона определяется на сервере сама. */
+  timezone: string;
+  has_token: boolean;
+}
+
+export interface AlertbotStatus {
+  installed: boolean;
+  configured: boolean;
+  active: boolean;
+  enabled: boolean;
+  dir: string;
+  service: string;
+  config: AlertbotConfig;
+}
+
+export interface AlertbotStatusResponse {
+  supported: boolean;
+  message?: string;
+  status?: AlertbotStatus;
+  hint?: string;
+  operation?: MtproxylOperation;
+}
+
+const ALERTBOT_BASE = `${BASE}/api/alertbot`;
+
+export const alertbotApi = {
+  status: () => request<AlertbotStatusResponse>(ALERTBOT_BASE, '/status'),
+  logs: (lines = 100) =>
+    request<{ lines: string }>(ALERTBOT_BASE, `/logs?lines=${lines}`),
+  /** Пустой токен — переустановка поверх настроенного, без смены токена. */
+  install: (token: string, chat: number) =>
+    request<MtproxylOperation>(ALERTBOT_BASE, '/install', {
+      method: 'POST',
+      body: JSON.stringify({ token, chat }),
+    }),
+  service: (action: 'start' | 'stop' | 'restart' | 'update') =>
+    request<{ output: string }>(ALERTBOT_BASE, '/service', {
+      method: 'POST',
+      body: JSON.stringify({ action }),
+    }),
+  uninstall: () =>
+    request<{ output: string }>(ALERTBOT_BASE, '/uninstall', { method: 'POST' }),
+  set: (key: string, value: string) =>
+    request<AlertbotStatusResponse>(ALERTBOT_BASE, '/settings', {
+      method: 'PUT',
+      body: JSON.stringify({ key, value }),
+    }),
+};
