@@ -158,6 +158,7 @@ function PanelNameCard() {
   const [value, setValue] = useState(name);
   const [saving, setSaving] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
 
   useEffect(() => setValue(name), [name]);
 
@@ -167,6 +168,10 @@ function PanelNameCard() {
     try {
       const res = await brandingApi.save(value.trim());
       apply(res.name);
+      setSaved(true);
+      // Подтверждение гаснет само: имя в шапке и во вкладке меняется сразу,
+      // и держать надпись «сохранено» дольше пары секунд незачем.
+      setTimeout(() => setSaved(false), 2500);
     } catch (e) {
       setFailed(e instanceof Error ? e.message : 'Не удалось сохранить');
     } finally {
@@ -199,6 +204,7 @@ function PanelNameCard() {
           Показывается в шапке и во вкладке браузера. Пусто — обычное «MTProxyL-Panel».
           Пригодится, когда панелей несколько: по одинаковым вкладкам их не различить.
         </p>
+        {saved && <p className="text-xs text-success">Имя сохранено — шапка и вкладка уже обновлены.</p>}
         {failed && <p className="text-xs text-danger">{failed}</p>}
       </CardContent>
     </Card>
