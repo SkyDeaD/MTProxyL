@@ -257,6 +257,10 @@ func (b *Bot) Reconfigure(cfg Config) {
 func (b *Bot) applyConfig(cfg Config) {
 	b.mu.Lock()
 	prev := b.cfg
+	// Прежний клиент снимается ДО замены: разговаривать со старым чатом надо
+	// прежним токеном. Новый токен принадлежит другому боту, и в чужой
+	// переписке он не может ни снять команды, ни убрать сообщение.
+	oldClient := b.client
 	b.cfg = cfg
 	if cfg.Token != "" {
 		if b.client == nil || prev.Token != cfg.Token {
@@ -274,14 +278,39 @@ func (b *Bot) applyConfig(cfg Config) {
 	// Прежнему админу подсказки команд надо снять: Telegram держит их на чат и
 	// сам не забывает, так что иначе у бывшего владельца они остались бы
 	// навсегда.
-	oldAdmin, oldClient, ctx := prev.AdminID, b.client, b.baseCtx
+	oldAdmin, ctx := prev.AdminID, b.baseCtx
+	moved := oldAdmin != 0 && oldAdmin != cfg.AdminID
+
+	// Сообщения принадлежат прежнему чату, и в новом их id ничего не значит:
+	// правка вернула бы «сообщения нет», бот отправил бы новое, а прежнее
+	// осталось бы висеть навсегда — убрать его было бы уже некому.
+	var oldStatus, oldService int
+	if moved {
+		oldStatus, oldService = b.state.MessageID, b.state.ServiceMessageID
+		b.state.MessageID, b.state.ServiceMessageID = 0, 0
+	}
+	persist, state := b.deps.Persist, b.state
 	b.mu.Unlock()
+
+	if moved && persist != nil {
+		if err := persist(state); err != nil {
+			log.Printf("[tgbot] не удалось забыть прежнее сообщение: %s", err)
+		}
+	}
 
 	if !started || sameLoop {
 		return
 	}
-	if oldAdmin != 0 && oldAdmin != cfg.AdminID && oldClient != nil && ctx != nil {
-		go b.unregisterCommands(ctx, oldClient, oldAdmin)
+	if moved && oldClient != nil && ctx != nil {
+		go func() {
+			b.unregisterCommands(ctx, oldClient, oldAdmin)
+			if oldStatus != 0 {
+				b.retireMessage(ctx, oldClient, oldAdmin, oldStatus)
+			}
+			if oldService != 0 {
+				b.dropMessage(ctx, oldClient, oldAdmin, oldService)
+			}
+		}()
 	}
 	b.restartPolling()
 }
@@ -542,6 +571,9 @@ func (b *Bot) evaluateAndDeliver(ctx context.Context) {
 		inc.MutedUntil = time.Time{}
 		if inc.AnyActive() {
 			d.Loud = true
+			// Со звуком, но без объяснения — худший вид сообщения: человек
+			// видит тревогу и не понимает, что именно случилось сейчас.
+			d.Banners = append(d.Banners, BannerMuteExpired)
 		}
 	}
 
@@ -769,6 +801,11 @@ func (b *Bot) deliver(ctx context.Context, d delivery) {
 		}
 	}
 
+	// Почему сообщение уходит новым, а не правится, — в журнал. В прошлый раз
+	// причину пришлось восстанавливать по косвенным признакам из текста самих
+	// сообщений, и это само по себе недоработка.
+	log.Printf("[tgbot] отправляю новое сообщение: %s", resendReason(d, messageID))
+
 	// Звук — только у настоящих событий. Ответ на команду переезжает вниз чата
 	// молча: человек и так смотрит на экран.
 	sent, err := client.SendMessage(ctx, cfg.AdminID, text, kb, !d.Loud)
@@ -797,6 +834,20 @@ func (b *Bot) deliver(ctx context.Context, d delivery) {
 	// Заодно уносим служебный ответ: свежий статус только что пришёл вниз
 	// чата, и прошлое подтверждение выше по истории уже ничего не добавляет.
 	b.clearService(ctx, client, cfg.AdminID)
+}
+
+// resendReason называет причину переотправки словами.
+func resendReason(d delivery, messageID int) string {
+	switch {
+	case messageID == 0:
+		return "прежнего сообщения нет — первое после запуска, либо его удалили"
+	case d.Loud:
+		return "событие: тревога или её окончание"
+	case d.Relocate:
+		return "команда: статус переезжает вниз чата"
+	default:
+		return "правка не прошла"
+	}
 }
 
 // retireMessage убирает прежнее живое сообщение. Telegram не даёт боту удалять

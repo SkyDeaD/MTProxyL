@@ -34,6 +34,10 @@ const (
 	// «восстановления», о них просто сообщают один раз.
 	BannerEngineRestarted
 	BannerIPChanged
+	// BannerMuteExpired — пауза кончилась, а авария всё ещё идёт. Без этой
+	// шапки сообщение приходило со звуком и без единого слова о том, почему
+	// оно вообще пришло: событий в этот такт не было.
+	BannerMuteExpired
 )
 
 // Failure — сорвавшаяся попытка проверки. Живёт отдельно от вердикта: неудача
@@ -86,6 +90,21 @@ type View struct {
 
 	Threshold float64
 	Now       time.Time
+
+	// zone — часовой пояс этого рендера. Снимается один раз в RenderStatus:
+	// localZone() перечитывает системную зону по истечении кэша и может
+	// смениться прямо посреди отрисовки, а тогда время проверки печатается в
+	// одной зоне, а подпись под сообщением — уже в другой. На боевом сервере
+	// это выглядело так, будто вердикт помолодел на пять часов.
+	zone *time.Location
+}
+
+// at приводит время к зоне этого рендера.
+func (v View) at(t time.Time) time.Time {
+	if v.zone == nil {
+		return t.In(localZone())
+	}
+	return t.In(v.zone)
 }
 
 const (
@@ -98,6 +117,8 @@ const (
 // незакрытые символы лучше Markdown, а имена провайдеров у зондов приходят
 // какими угодно.
 func RenderStatus(v View) string {
+	v.zone = localZone()
+
 	var b strings.Builder
 
 	writeBanners(&b, v)
@@ -105,7 +126,7 @@ func RenderStatus(v View) string {
 	if v.Failure != nil {
 		b.WriteString("⚠️ <b>Проверка не удалась</b>\n")
 		b.WriteString(esc(v.Failure.Reason) + "\n")
-		b.WriteString("Попытка: " + stamp(v.Failure.At) + "\n")
+		b.WriteString("Попытка: " + stamp(v, v.Failure.At) + "\n")
 		if v.Result == nil {
 			b.WriteString("\nУдачных проверок пока не было.\n")
 			writeFooter(&b, v)
@@ -141,7 +162,7 @@ func RenderStatus(v View) string {
 	b.WriteString("\n\n")
 
 	writeTarget(&b, v)
-	b.WriteString("Проверено: " + stamp(r.CheckedAt) + "\n")
+	b.WriteString("Проверено: " + stamp(v, r.CheckedAt) + "\n")
 	writeFooter(&b, v)
 
 	writeUplink(&b, v)
@@ -201,7 +222,7 @@ func writeUplink(b *strings.Builder, v View) {
 	if u.Version != "" {
 		fmt.Fprintf(b, "Движок: %s\n", esc(u.Version))
 	}
-	b.WriteString("Проверено: " + stampShort(u.CheckedAt) + "\n")
+	b.WriteString("Проверено: " + stampShort(v, u.CheckedAt) + "\n")
 }
 
 // writeLoad — справка о нагрузке. На вердикт не влияет: «ошибочные» здесь про
@@ -585,6 +606,10 @@ func writeBanner(b *strings.Builder, v View, banner Banner) {
 		b.WriteString("📍 <b>Сменился внешний адрес сервера</b>\n")
 		fmt.Fprintf(b, "Было <code>%s</code> → стало <code>%s</code>\n", esc(v.PrevIP), esc(v.NewIP))
 		b.WriteString("Проверьте DNS и ссылки для клиентов — прежний адрес больше не отвечает.\n")
+
+	case BannerMuteExpired:
+		b.WriteString("🔔 <b>Пауза кончилась, авария продолжается</b>\n")
+		b.WriteString("Тревоги снова включены. Подробности ниже.\n")
 	}
 }
 
@@ -595,7 +620,7 @@ func muteNote(v View) string {
 	case v.MuteForever:
 		return "🔕 <b>Тревоги заглушены до отмены</b> — /unmute\n"
 	case !v.MutedUntil.IsZero() && v.Now.Before(v.MutedUntil):
-		return "🔕 <b>Тревоги заглушены до " + v.MutedUntil.In(localZone()).Format("15:04") + "</b> — /unmute\n"
+		return "🔕 <b>Тревоги заглушены до " + v.at(v.MutedUntil).Format("15:04") + "</b> — /unmute\n"
 	}
 	return ""
 }
@@ -665,7 +690,7 @@ func writeZone(b *strings.Builder, v View) {
 	if v.Result != nil && !v.Result.CheckedAt.IsZero() {
 		when = v.Result.CheckedAt
 	}
-	if note := zoneNote(when); note != "" {
+	if note := zoneNote(v, when); note != "" {
 		b.WriteString("\n<i>время сервера: " + note + "</i>\n")
 	}
 }
@@ -813,8 +838,8 @@ func RenderHelp() string {
 
 // RenderTestMessage — то, что уходит по кнопке «Тест» в панели.
 func RenderTestMessage(now time.Time) string {
-	return "✅ <b>Бот подключён</b>\n\nПанель достучалась до Telegram в " +
-		stamp(now) + ".\nСтатус доступности придёт отдельным сообщением."
+	return "✅ <b>Бот подключён</b>\n\nСвязь с Telegram есть, время на сервере — " +
+		stamp(View{zone: localZone()}, now) + ".\nСтатус придёт отдельным сообщением."
 }
 
 // ── Мелочи ──────────────────────────────────────────────────────────────────
@@ -862,11 +887,11 @@ func plural(n int, one, few, many string) string {
 	}
 }
 
-func stampShort(t time.Time) string {
+func stampShort(v View, t time.Time) string {
 	if t.IsZero() {
 		return "—"
 	}
-	return t.In(localZone()).Format("02.01.2006, 15:04")
+	return v.at(t).Format("02.01.2006, 15:04")
 }
 
 // zoneNote — обозначение часового пояса, в котором показано время.
@@ -874,11 +899,14 @@ func stampShort(t time.Time) string {
 // Без него расхождение с интерфейсом панели выглядит поломкой: там время
 // форматирует браузер в зоне читателя, а здесь — сервер в своей. Плюс сам
 // сервер могли переключить, и полезно видеть, в какой зоне бот сейчас пишет.
-func zoneNote(t time.Time) string {
+func zoneNote(v View, t time.Time) string {
 	if t.IsZero() {
 		return ""
 	}
-	loc := localZone()
+	loc := v.zone
+	if loc == nil {
+		loc = localZone()
+	}
 	name, offset := t.In(loc).Zone()
 	// У многих зон Zone() возвращает «+05», а человеку полезнее «Asia/Tashkent»
 	// — это то, что он вводил в панели или видит в timedatectl.
@@ -901,11 +929,11 @@ func zoneNote(t time.Time) string {
 	return utc
 }
 
-func stamp(t time.Time) string {
+func stamp(v View, t time.Time) string {
 	if t.IsZero() {
 		return "—"
 	}
-	return t.In(localZone()).Format("02.01.2006, 15:04:05")
+	return v.at(t).Format("02.01.2006, 15:04:05")
 }
 
 func humanInterval(d time.Duration) string {

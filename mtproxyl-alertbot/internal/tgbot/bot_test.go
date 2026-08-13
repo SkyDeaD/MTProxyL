@@ -795,3 +795,62 @@ func TestStartReplyStaysOutOfServiceSlot(t *testing.T) {
 		t.Errorf("ответ на /start попал в слот служебных: %d", id)
 	}
 }
+
+// Смена адреса доставки: сообщения принадлежат прежнему чату, и в новом их id
+// ничего не значит. Прежние надо убрать своими руками — потом это будет уже
+// некому сделать, и они останутся висеть навсегда.
+func TestApplyConfigCleansOldChat(t *testing.T) {
+	var saved []PersistedState
+	b, rec := newTestBot(t, Deps{Persist: func(s PersistedState) error {
+		saved = append(saved, s)
+		return nil
+	}}, PersistedState{MessageID: 77, ServiceMessageID: 88})
+	b.baseCtx = context.Background()
+	b.started = true
+
+	b.applyConfig(Config{Enabled: true, Token: "123456:test", AdminID: 999})
+
+	b.mu.Lock()
+	status, service := b.state.MessageID, b.state.ServiceMessageID
+	b.mu.Unlock()
+	if status != 0 || service != 0 {
+		t.Errorf("id прежнего чата остались: статус %d, служебное %d", status, service)
+	}
+	if len(saved) == 0 {
+		t.Fatal("забытые id не сохранены — после перезапуска бот снова их вспомнит")
+	}
+
+	// Уборка идёт в отдельной горутине: ждём, пока она доберётся до Telegram.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && rec.count("deleteMessage") < 2 {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if n := rec.count("deleteMessage"); n < 2 {
+		t.Errorf("прежние сообщения не убраны: удалений %d, вызовы %v", n, rec.methods())
+	}
+	for _, c := range rec.calls {
+		if c.Method == "deleteMessage" && c.Body["chat_id"] != float64(555) {
+			t.Errorf("удаление ушло не в прежний чат: %v", c.Body["chat_id"])
+		}
+	}
+}
+
+// Смена только токена адрес не меняет — прежние сообщения трогать незачем.
+func TestApplyConfigKeepsMessagesWhenChatIsSame(t *testing.T) {
+	b, rec := newTestBot(t, Deps{}, PersistedState{MessageID: 77})
+	b.baseCtx = context.Background()
+	b.started = true
+
+	b.applyConfig(Config{Enabled: true, Token: "654321:other", AdminID: 555})
+
+	b.mu.Lock()
+	status := b.state.MessageID
+	b.mu.Unlock()
+	if status != 77 {
+		t.Errorf("id живого сообщения потерян: %d", status)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if n := rec.count("deleteMessage"); n != 0 {
+		t.Errorf("сообщение убрано зря: %v", rec.methods())
+	}
+}

@@ -632,17 +632,17 @@ func TestZoneNoteFormat(t *testing.T) {
 	tashkent := time.FixedZone("+05", 5*3600)
 	tzCached, tzCheckAt = tashkent, time.Now()
 
-	if got := zoneNote(time.Now()); got != "UTC+05" {
+	if got := zoneNote(View{}, time.Now()); got != "UTC+05" {
 		t.Errorf("zoneNote = %q, ожидалось UTC+05", got)
 	}
 
 	tzCached, tzCheckAt = time.FixedZone("MSK", 3*3600), time.Now()
-	if got := zoneNote(time.Now()); got != "MSK, UTC+03" {
+	if got := zoneNote(View{}, time.Now()); got != "MSK, UTC+03" {
 		t.Errorf("zoneNote = %q, ожидалось «MSK, UTC+03»", got)
 	}
 
 	tzCached, tzCheckAt = time.FixedZone("-0330", -3*3600-1800), time.Now()
-	if got := zoneNote(time.Now()); got != "UTC-03:30" {
+	if got := zoneNote(View{}, time.Now()); got != "UTC-03:30" {
 		t.Errorf("zoneNote = %q, ожидалось UTC-03:30", got)
 	}
 }
@@ -867,5 +867,66 @@ func TestRenderStatusFoldsLongClassTail(t *testing.T) {
 	}
 	if strings.Contains(out, "класс_11") {
 		t.Errorf("показаны все причины, хотя хвост должен быть свёрнут:\n%s", out)
+	}
+}
+
+// Зона снимается один раз на рендер. Иначе истёкший кэш посреди отрисовки даёт
+// сообщение, где время проверки в одной зоне, а подпись — про другую: ровно
+// это и случилось на боевом сервере, где вердикт «помолодел» на пять часов.
+func TestRenderStatusUsesOneZoneThroughout(t *testing.T) {
+	resetZoneCache()
+	t.Cleanup(resetZoneCache)
+
+	tashkent, err := time.LoadLocation("Asia/Tashkent")
+	if err != nil {
+		t.Fatalf("зона не загрузилась: %s", err)
+	}
+	tzCached, tzCheckAt = tashkent, time.Now()
+
+	// Кэш протухает после первого же обращения, а системная зона к этому
+	// моменту «сменилась» на UTC.
+	calls := 0
+	tzNow = func() time.Time {
+		calls++
+		if calls > 1 {
+			return time.Now().Add(2 * tzRecheck)
+		}
+		return time.Now()
+	}
+	tzEnv = func(string) string { return "UTC" }
+	t.Cleanup(func() {
+		tzNow = time.Now
+		tzEnv = os.Getenv
+	})
+
+	checked := time.Date(2026, 8, 13, 4, 27, 13, 0, time.UTC)
+	r := sampleResult(20, 20)
+	r.CheckedAt = checked
+	v := baseView(r)
+	v.Now = checked.Add(13 * time.Minute)
+
+	out := RenderStatus(v)
+
+	if !strings.Contains(out, "09:27:13") {
+		t.Errorf("время проверки не в зоне рендера:\n%s", out)
+	}
+	if strings.Contains(out, "04:27:13") {
+		t.Errorf("время осталось в прежней зоне, хотя подпись уже другая:\n%s", out)
+	}
+	if !strings.Contains(out, "Asia/Tashkent") {
+		t.Errorf("подпись зоны разошлась со временем:\n%s", out)
+	}
+}
+
+// Пауза кончилась, а авария идёт — сообщение приходит со звуком и обязано
+// объяснить, почему пришло.
+func TestRenderStatusMuteExpiredBanner(t *testing.T) {
+	v := baseView(sampleResult(20, 20))
+	v.Banners = []Banner{BannerMuteExpired}
+
+	out := RenderStatus(v)
+
+	if !strings.Contains(out, "Пауза кончилась") {
+		t.Errorf("нет шапки про истёкшую паузу:\n%s", out)
 	}
 }
