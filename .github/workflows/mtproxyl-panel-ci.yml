@@ -69,6 +69,26 @@ jobs:
           version: latest
           working-directory: mtproxyl-panel
 
+      # Бот-сторож — отдельный модуль со своими тестами. Проверяем здесь же:
+      # выпускаются они вместе, значит и ломаться должны заметно.
+      - name: Alert bot checks
+        working-directory: mtproxyl-alertbot
+        run: |
+          out=$(gofmt -l .)
+          if [ -n "$out" ]; then
+            echo "Files not formatted with gofmt:"
+            echo "$out"
+            exit 1
+          fi
+          go vet ./...
+          go test -race ./...
+
+      - name: golangci-lint (alert bot)
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: latest
+          working-directory: mtproxyl-alertbot
+
   build:
     runs-on: ubuntu-latest
     steps:
