@@ -90,6 +90,10 @@ type View struct {
 
 	Threshold float64
 	Now       time.Time
+	// UplinkInterval — как часто опрашивается связь с дата-центрами. Приходит
+	// снаружи, а не зашит в текст: поменяется период — сообщение не должно
+	// врать.
+	UplinkInterval time.Duration
 
 	// zone — часовой пояс этого рендера. Снимается один раз в RenderStatus:
 	// localZone() перечитывает системную зону по истечении кэша и может
@@ -199,7 +203,13 @@ func writeUplink(b *strings.Builder, v View) {
 	}
 
 	fmt.Fprintf(b, "%s <b>Связь с Telegram — %s</b>\n", levelDot(globalpingLevel(u.Level)), uplinkVerdict(u))
-	b.WriteString("<i>выход: прокси → дата-центры</i>\n\n")
+	b.WriteString("<i>выход: прокси → дата-центры</i>")
+	// Возраст цифр — там же, где у доступности: без него непонятно, свежие они
+	// или наблюдение отвалилось четверть часа назад.
+	if ago := duration(v.Now, u.CheckedAt); ago != "" {
+		b.WriteString(" · " + ago + " назад")
+	}
+	b.WriteString("\n\n")
 
 	// Причины идут отдельными строками, а не в заголовке: там они складывались
 	// в неразборчивую строку с двойным тире.
@@ -222,7 +232,13 @@ func writeUplink(b *strings.Builder, v View) {
 	if u.Version != "" {
 		fmt.Fprintf(b, "Движок: %s\n", esc(u.Version))
 	}
-	b.WriteString("Проверено: " + stampShort(v, u.CheckedAt) + "\n")
+	b.WriteString("Проверено: " + stampShort(v, u.CheckedAt))
+	// Сколько раз в минуту — вопрос, который задают первым: у доступности
+	// частота видна строкой «Автопроверка», а здесь её взять было неоткуда.
+	if v.UplinkInterval > 0 {
+		b.WriteString(" · наблюдение раз в " + humanInterval(v.UplinkInterval))
+	}
+	b.WriteString("\n")
 }
 
 // writeLoad — справка о нагрузке. На вердикт не влияет: «ошибочные» здесь про

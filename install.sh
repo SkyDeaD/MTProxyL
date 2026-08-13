@@ -8,7 +8,11 @@
 
 set -e
 
-REPO="Liafanx/MTProxyL"
+# Репозиторий, из которого ставится и потом обновляется MTProxyL. Форк
+# указывается флагом --repo или переменной MTPROXYL_REPO: без этого установка
+# из форка работала бы один раз, а первый же `mtproxyl update` вернул бы файлы
+# оригинала и унёс всё, чего в нём нет.
+REPO="${MTPROXYL_REPO:-Liafanx/MTProxyL}"
 INSTALL_DIR="/opt/mtproxyl"
 # Ветка репозитория, из которой скачиваются скрипт и библиотеки
 BRANCH="${MTPROXYL_BRANCH:-main}"
@@ -19,8 +23,12 @@ while [ $# -gt 0 ]; do
             [ -n "${2:-}" ] || { echo "ОШИБКА: --branch требует имя ветки" >&2; exit 1; }
             BRANCH="$2"; shift 2 ;;
         --branch=*) BRANCH="${1#*=}"; shift ;;
+        -r|--repo)
+            [ -n "${2:-}" ] || { echo "ОШИБКА: --repo требует имя репозитория" >&2; exit 1; }
+            REPO="$2"; shift 2 ;;
+        --repo=*) REPO="${1#*=}"; shift ;;
         -h|--help)
-            echo "Использование: install.sh [--branch <ветка>]"
+            echo "Использование: install.sh [--branch <ветка>] [--repo <владелец/репозиторий>]"
             exit 0 ;;
         *) echo "ОШИБКА: неизвестный аргумент: $1" >&2; exit 1 ;;
     esac
@@ -116,7 +124,7 @@ fi
 chmod +x "${INSTALL_DIR}/mtproxyl.sh"
 
 # Библиотеки
-for lib in colors utils settings secrets config docker engine traffic availability geoblock geoip upstream backup nft selfmask panel tgbot detect tui_main tui_proxy tui_secrets tui_links tui_settings tui_security tui_traffic tui_engine tui_backup tui_expert tui_nft tui_selfmask tui_addons tui_tgbot tui_detect expert_catalog expert_mode settings_cli install; do
+for lib in colors utils settings secrets config docker engine traffic availability geoblock geoip upstream backup nft selfmask panel tgbot alertbot detect tui_main tui_proxy tui_secrets tui_links tui_settings tui_security tui_traffic tui_engine tui_backup tui_expert tui_nft tui_selfmask tui_addons tui_tgbot tui_alertbot tui_detect expert_catalog expert_mode settings_cli install; do
     echo "  → lib/${lib}.sh"
     if ! download_file "${SCRIPT_URL}/lib/${lib}.sh" "${INSTALL_DIR}/lib/${lib}.sh" "lib/${lib}.sh"; then
         echo "  Установка прервана. Повторите попытку через 10–30 секунд." >&2
@@ -125,6 +133,16 @@ for lib in colors utils settings secrets config docker engine traffic availabili
     fi
     sleep 0.2
 done
+
+# Репозиторий запоминаем, если он не официальный: обновления должны приходить
+# оттуда же, откуда пришла установка.
+if [ "$REPO" = "Liafanx/MTProxyL" ]; then
+    rm -f "${INSTALL_DIR}/.repo"
+else
+    echo "$REPO" > "${INSTALL_DIR}/.repo"
+    chmod 600 "${INSTALL_DIR}/.repo"
+    echo "  → обновления будут браться из ${REPO}"
+fi
 
 # Ветку запоминаем, только если она не релизная: тогда и обновления
 # продолжат приходить из неё же.

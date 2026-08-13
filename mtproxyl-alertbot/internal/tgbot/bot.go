@@ -82,6 +82,9 @@ type Deps struct {
 	// UplinkSnapshot отдаёт последний вердикт наблюдения за связью с
 	// дата-центрами; nil, если наблюдение выключено.
 	UplinkSnapshot func() *uplink.Status
+	// UplinkInterval — с какой частотой это наблюдение идёт. Показывается в
+	// сообщении: «раз в минуту» — первый вопрос, который задают про этот блок.
+	UplinkInterval time.Duration
 	// AvailabilityEnabled=false — внешняя проверка выключена в конфиге панели.
 	// Бот при этом работает: связь с дата-центрами он наблюдает сам.
 	AvailabilityEnabled bool
@@ -486,9 +489,52 @@ func (b *Bot) absorbUplink(st *uplink.Status) {
 		return
 	}
 	b.mu.Lock()
+	// Прореживание тихих правок заведено против ежеминутной телеметрии, но оно
+	// не должно молчать, когда изменилось то, ради чего это сообщение и
+	// читают. Меняющиеся сами по себе RTT и счётчики соединений в расчёт не
+	// берутся: иначе исключение стало бы правилом.
+	if uplinkChangedMeaningfully(b.lastUplink, st) {
+		b.forceRedraw = true
+	}
 	b.lastUplink = st
 	b.pendingUplink = st
 	b.mu.Unlock()
+}
+
+// uplinkChangedMeaningfully отвечает, стоит ли перерисовать сообщение
+// немедленно. Первый вердикт — стоит: до него в блоке было пусто.
+func uplinkChangedMeaningfully(prev, next *uplink.Status) bool {
+	if prev == nil {
+		return true
+	}
+	switch {
+	case prev.Level != next.Level:
+		return true
+	case prev.AliveWriters != next.AliveWriters:
+		return true
+	case len(prev.Problems) != len(next.Problems):
+		return true
+	case prev.Applicable != next.Applicable:
+		return true
+	case (prev.EngineError == "") != (next.EngineError == ""):
+		return true
+	case deadDCs(prev.DCs) != deadDCs(next.DCs):
+		return true
+	}
+	return false
+}
+
+// deadDCs — сколько дата-центров осталось без живых писателей. Число само по
+// себе не тревога (у медиа-дата-центров их штатно нет), но его изменение —
+// повод показать свежую картину.
+func deadDCs(dcs []uplink.DCRtt) int {
+	n := 0
+	for _, dc := range dcs {
+		if dc.AliveWriters == 0 {
+			n++
+		}
+	}
+	return n
 }
 
 // evaluateAndDeliver — единственное место, где считаются инциденты и меняется
@@ -725,6 +771,7 @@ func (b *Bot) deliver(ctx context.Context, d delivery) {
 		Quota:               zeroQuota(b.deps.Quota),
 		AutoCheck:           b.deps.AutoCheck == nil || b.deps.AutoCheck(),
 		Interval:            b.deps.Interval,
+		UplinkInterval:      b.deps.UplinkInterval,
 		Banners:             d.Banners,
 		PrevPercentage:      d.PrevPercentage,
 		PrevKnown:           d.PrevKnown,

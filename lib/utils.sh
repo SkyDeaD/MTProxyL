@@ -582,6 +582,18 @@ self_update() {
         fi
     fi
 
+    # Бот-сторож обновляется тем же заходом: он выпускается вместе с панелью,
+    # и оставлять его на старой версии, обновив всё вокруг, — верный способ
+    # однажды получить бота, который не понимает новый вывод CLI.
+    if declare -f alertbot_installed >/dev/null 2>&1 && alertbot_installed 2>/dev/null; then
+        log_info "Обновляем бота-сторожа..."
+        if alertbot_update; then
+            log_success "Бот-сторож обновлён и перезапущен"
+        else
+            log_warn "Сторожа обновить не удалось — повторите: mtproxyl alertbot update"
+        fi
+    fi
+
     log_success "MTProxyL обновлён: v${VERSION} → v${_new_ver}"
     if [ "$_restart" = "false" ]; then
         return 0

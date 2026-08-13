@@ -930,3 +930,34 @@ func TestRenderStatusMuteExpiredBanner(t *testing.T) {
 		t.Errorf("нет шапки про истёкшую паузу:\n%s", out)
 	}
 }
+
+// ── Время и частота в блоке связи ───────────────────────────────────────────
+
+// У доступности возраст цифр виден в шапке, и у связи с дата-центрами он нужен
+// ровно так же: иначе непонятно, свежие они или наблюдение отвалилось.
+func TestRenderStatusUplinkShowsAgeAndInterval(t *testing.T) {
+	v := baseView(sampleResult(20, 20))
+	u := liveUplink()
+	u.CheckedAt = v.Now.Add(-3 * time.Minute)
+	v.Uplink = u
+	v.UplinkInterval = time.Minute
+
+	out := RenderStatus(v)
+
+	if !strings.Contains(out, "3 мин назад") {
+		t.Errorf("в блоке связи нет возраста цифр:\n%s", out)
+	}
+	if !strings.Contains(out, "наблюдение раз в 1 мин") {
+		t.Errorf("в блоке связи не сказано, как часто он обновляется:\n%s", out)
+	}
+}
+
+// Частота приходит снаружи: не задана — строки нет, врать про период нельзя.
+func TestRenderStatusUplinkOmitsIntervalWhenUnknown(t *testing.T) {
+	v := baseView(sampleResult(20, 20))
+	v.Uplink = liveUplink()
+
+	if out := RenderStatus(v); strings.Contains(out, "наблюдение раз в") {
+		t.Errorf("частота напечатана, хотя её никто не сообщал:\n%s", out)
+	}
+}

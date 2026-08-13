@@ -854,3 +854,60 @@ func TestApplyConfigKeepsMessagesWhenChatIsSame(t *testing.T) {
 		t.Errorf("сообщение убрано зря: %v", rec.methods())
 	}
 }
+
+// ── Живая правка при существенных изменениях ────────────────────────────────
+
+// Прореживание правок не должно молчать, когда изменилось то, ради чего
+// сообщение и читают.
+func TestUplinkChangeForcesRedraw(t *testing.T) {
+	base := func() *uplink.Status {
+		rtt := 100.0
+		return &uplink.Status{
+			Applicable: true, EngineUp: true, Level: uplink.LevelGreen,
+			AliveWriters: 40, RequiredWriters: 40,
+			DCs: []uplink.DCRtt{{DC: 1, RTTEmaMs: &rtt, AliveWriters: 3, RequiredWriters: 3}},
+		}
+	}
+	other := 250.0
+
+	cases := []struct {
+		name string
+		next func(*uplink.Status)
+		want bool
+	}{
+		{"первый вердикт", nil, true},
+		{"сменился уровень", func(s *uplink.Status) { s.Level = uplink.LevelRed }, true},
+		{"меньше писателей", func(s *uplink.Status) { s.AliveWriters = 10 }, true},
+		{"появилась проблема", func(s *uplink.Status) { s.Problems = []string{"нет писателей"} }, true},
+		{"дата-центр умолк", func(s *uplink.Status) { s.DCs[0].AliveWriters = 0 }, true},
+		{"движок отвалился", func(s *uplink.Status) { s.EngineError = "нет связи" }, true},
+		// RTT и счётчики шевелятся каждую минуту сами по себе: если считать их
+		// поводом, исключение станет правилом и вернутся 1440 правок в сутки.
+		{"только RTT", func(s *uplink.Status) { s.DCs[0].RTTEmaMs = &other }, false},
+		{"только соединения", func(s *uplink.Status) { s.Connections = 999 }, false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			b, _ := newTestBot(t, Deps{}, PersistedState{MessageID: 77})
+			if tc.next != nil {
+				b.absorbUplink(base())
+				b.mu.Lock()
+				b.forceRedraw = false
+				b.mu.Unlock()
+			}
+			next := base()
+			if tc.next != nil {
+				tc.next(next)
+			}
+			b.absorbUplink(next)
+
+			b.mu.Lock()
+			got := b.forceRedraw
+			b.mu.Unlock()
+			if got != tc.want {
+				t.Errorf("немедленная правка = %v, ожидалось %v", got, tc.want)
+			}
+		})
+	}
+}
