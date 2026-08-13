@@ -190,6 +190,23 @@ _alertbot_fetch_binary() {
     return 0
 }
 
+# Копия установщика рядом с ботом. Ею панель нажимает «Установить»,
+# «Обновить» и «Удалить»: своего способа поставить бота у неё нет, а
+# установка из меню оставляла её без этого файла — и кнопки упирались в
+# «No such file».
+_alertbot_fetch_installer() {
+    local _branch="${ALERTBOT_BRANCH:-tg-testing}" _tmp
+    _tmp=$(mktemp) || return 0
+    if curl -fsSL "https://raw.githubusercontent.com/${ALERTBOT_REPO}/${_branch}/install-alertbot.sh" \
+            -o "$_tmp" 2>/dev/null && sh -n "$_tmp" 2>/dev/null; then
+        install -m 0755 "$_tmp" "${ALERTBOT_DIR}/install-alertbot.sh"
+    else
+        log_warn "Копию установщика скачать не удалось — управление ботом из панели будет недоступно"
+    fi
+    rm -f "$_tmp"
+    return 0
+}
+
 # Последний релиз форка. Отдельной функцией: при обновлении бота тег снова
 # нужен, а зашивать его в код значило бы обновляться правкой скрипта.
 _alertbot_latest_tag() {
@@ -328,6 +345,7 @@ alertbot_install() {
     chmod 750 "$ALERTBOT_DIR"
 
     _alertbot_fetch_binary "$_tag" || return 1
+    _alertbot_fetch_installer
     _alertbot_write_sudoers || return 1
     _alertbot_write_config "$_token" "$_chat" || return 1
     _alertbot_write_service
@@ -397,6 +415,7 @@ alertbot_update() {
     _tag=$(_alertbot_latest_tag)
     [ -n "$_tag" ] || { log_error "Не удалось узнать последний релиз"; return 1; }
     _alertbot_fetch_binary "$_tag" || return 1
+    _alertbot_fetch_installer
     # Список разрешённых команд переписываем при каждом обновлении: новая
     # версия однажды упрётся в отказ на команде, которой в старых правилах нет.
     _alertbot_write_sudoers || return 1

@@ -603,7 +603,17 @@ $SYSTEM_USER ALL=(root) NOPASSWD: /opt/mtproxyl-alertbot/mtproxyl-alertbot confi
 $SYSTEM_USER ALL=(root) NOPASSWD: /opt/mtproxyl-alertbot/mtproxyl-alertbot config set [a-z_]* *
 $SYSTEM_USER ALL=(root) NOPASSWD: /bin/sh /opt/mtproxyl-alertbot/install-alertbot.sh
 $SYSTEM_USER ALL=(root) NOPASSWD: /bin/sh /opt/mtproxyl-alertbot/install-alertbot.sh --token [0-9]* --chat *
+$SYSTEM_USER ALL=(root) NOPASSWD: /bin/sh /opt/mtproxyl-alertbot/install-alertbot.sh --chat *
 $SYSTEM_USER ALL=(root) NOPASSWD: /bin/sh /opt/mtproxyl-alertbot/install-alertbot.sh --uninstall
+# На части систем sh лежит в /usr/bin, и правило с /bin/sh туда не подходит.
+$SYSTEM_USER ALL=(root) NOPASSWD: /usr/bin/sh /opt/mtproxyl-alertbot/install-alertbot.sh
+$SYSTEM_USER ALL=(root) NOPASSWD: /usr/bin/sh /opt/mtproxyl-alertbot/install-alertbot.sh --token [0-9]* --chat *
+$SYSTEM_USER ALL=(root) NOPASSWD: /usr/bin/sh /opt/mtproxyl-alertbot/install-alertbot.sh --chat *
+$SYSTEM_USER ALL=(root) NOPASSWD: /usr/bin/sh /opt/mtproxyl-alertbot/install-alertbot.sh --uninstall
+# Проверка наличия установщика: панель обязана отличить «нет файла» от
+# «нет прав», иначе объяснит человеку неправду.
+$SYSTEM_USER ALL=(root) NOPASSWD: /usr/bin/test -f /opt/mtproxyl-alertbot/install-alertbot.sh
+$SYSTEM_USER ALL=(root) NOPASSWD: /bin/test -f /opt/mtproxyl-alertbot/install-alertbot.sh
 # Выбор активного бота: включённым может быть только один, поэтому панели нужны
 # и enable, и disable — без них после перезагрузки поднялся бы прежний.
 $SYSTEM_USER ALL=(root) NOPASSWD: /bin/systemctl enable mtproxyl-alertbot.service
