@@ -169,14 +169,30 @@ func RenderStatus(v View) string {
 	b.WriteString("Проверено: " + stamp(v, r.CheckedAt) + "\n")
 	writeFooter(&b, v)
 
-	writeUplink(&b, v)
-	// Зонды — последними: их обрезка считает уже занятое место, поэтому блок
-	// связи, поставленный сюда, влезает всегда, а ужимается список зондов. Если
-	// поменять местами, при полусотне зондов блок связи просто не поместится —
-	// то есть пропадёт ровно тогда, когда он нужнее всего.
-	writeProbes(&b, r)
-	writeZone(&b, v)
+	// Хвост собирается раньше зондов, хотя печатается после. Причина в бюджете:
+	// список зондов — единственное, что можно ужать, поэтому он получает
+	// остаток места, а не забирает его у показателей связи. Раньше ради этого
+	// зонды печатались последними, но тогда они отрывались от собственного
+	// вердикта, а между ними вклинивались два чужих раздела.
+	var tail strings.Builder
+	writeUplink(&tail, v)
+	writeLoad(&tail, v)
+	writeZone(&tail, v)
+
+	used := len([]rune(b.String())) + len([]rune(tail.String()))
+	writeProbes(&b, r, MessageLimit-used-16)
+	b.WriteString(tail.String())
 	return clamp(b.String())
+}
+
+// section рисует границу между разделами. Пустой строки мало: Telegram
+// съедает перевод строки сразу после кодового блока, и соседние таблицы
+// склеиваются в одну кашу — это видно на первом же живом сообщении.
+func section(b *strings.Builder, title string) {
+	b.WriteString("\n──────────\n\n")
+	if title != "" {
+		b.WriteString("<b>" + title + "</b>\n")
+	}
 }
 
 // writeUplink — второй блок сообщения: исходящая связь прокси с
@@ -188,7 +204,7 @@ func writeUplink(b *strings.Builder, v View) {
 		return
 	}
 
-	b.WriteString("\n──────────\n\n")
+	section(b, "")
 
 	switch {
 	case u.EngineError != "":
@@ -228,15 +244,12 @@ func writeUplink(b *strings.Builder, v View) {
 		}
 	}
 	writeDCs(b, u.DCs)
-	writeLoad(b, v, u)
-	if u.Version != "" {
-		fmt.Fprintf(b, "Движок: %s\n", esc(u.Version))
-	}
 	b.WriteString("Проверено: " + stampShort(v, u.CheckedAt))
-	// Сколько раз в минуту — вопрос, который задают первым: у доступности
-	// частота видна строкой «Автопроверка», а здесь её взять было неоткуда.
+	// Частота — вопрос, который задают первым. Говорим и про неё, и про то,
+	// что сообщение правится не каждую минуту: иначе «раз в минуту» рядом с
+	// отметкой пятиминутной давности выглядит противоречием.
 	if v.UplinkInterval > 0 {
-		b.WriteString(" · наблюдение раз в " + humanInterval(v.UplinkInterval))
+		b.WriteString(" · опрос раз в " + humanInterval(v.UplinkInterval))
 	}
 	b.WriteString("\n")
 }
@@ -244,10 +257,12 @@ func writeUplink(b *strings.Builder, v View) {
 // writeLoad — справка о нагрузке. На вердикт не влияет: «ошибочные» здесь про
 // клиентов (обрезанный ClientHello, таймаут рукопожатия), а не про связь с
 // дата-центрами, и на публичном прокси их доля всегда заметна.
-func writeLoad(b *strings.Builder, v View, u *uplink.Status) {
-	if u.Connections <= 0 && u.ActiveIPs <= 0 {
+func writeLoad(b *strings.Builder, v View) {
+	u := v.Uplink
+	if u == nil || (u.Connections <= 0 && u.ActiveIPs <= 0) {
 		return
 	}
+	section(b, "Нагрузка")
 
 	var rows [][]string
 	add := func(label, value string) { rows = append(rows, []string{label, value}) }
@@ -272,9 +287,10 @@ func writeLoad(b *strings.Builder, v View, u *uplink.Status) {
 		add("Трафик", humanBytes(u.TrafficOct))
 	}
 
-	b.WriteString("\n")
-	b.WriteString(table("Нагрузка", nil, []bool{false, true}, rows))
-	b.WriteString("\n")
+	if u.Version != "" {
+		add("Движок", u.Version)
+	}
+	b.WriteString(table("Показатели", nil, []bool{false, true}, rows))
 
 	writeClasses(b, "Ошибки соединений", u.ConnectionsBad, u.BadClasses)
 	writeClasses(b, "Сбои рукопожатия", u.HandshakeFails, u.HandshakeClasses)
@@ -325,12 +341,15 @@ func writeClasses(b *strings.Builder, title string, total int64, classes []uplin
 		shown += c.Count
 	}
 
-	label := title
+	// Подпись обычным текстом перед таблицей, а не только в её шапке: Telegram
+	// склеивает соседние кодовые блоки, и без этой строки «Трафик 795.4 МБ» и
+	// «TLS handshake — bad client» оказывались в одной строке.
+	b.WriteString("\n<b>" + title + "</b>")
 	if total > 0 {
-		label += " " + groupDigits(total)
+		b.WriteString(" — " + groupDigits(total))
 	}
-	b.WriteString(table(label, nil, []bool{false, true}, rows))
 	b.WriteString("\n")
+	b.WriteString(table(title, nil, []bool{false, true}, rows))
 }
 
 // table собирает моноширинную таблицу: ширины колонок считаются по факту,
@@ -715,14 +734,16 @@ func writeZone(b *strings.Builder, v View) {
 // в колонки, чтобы взгляд шёл по столбцу, а не выискивал названия в строках.
 // Причины отказов не повторяются у каждой строки — они собраны сводкой ниже.
 //
-// Таблица идёт последней и рисуется в остаток бюджета сообщения. Это важно:
-// она внутри <pre>, и если бы её обрезал общий clamp, закрывающий тег потерялся
-// бы, а Telegram отклонил бы сообщение целиком — то есть статуса не было бы
-// вовсе.
-func writeProbes(b *strings.Builder, r *mtproxyl.CheckResult) {
+// Таблица рисуется в отведённый ей остаток бюджета: она внутри <pre>, и если
+// бы её обрезал общий clamp, закрывающий тег потерялся бы, а Telegram отклонил
+// бы сообщение целиком — то есть статуса не было бы вовсе. Остаток считает
+// вызывающий: печатается таблица раньше блоков связи и нагрузки, но ужиматься
+// должна именно она.
+func writeProbes(b *strings.Builder, r *mtproxyl.CheckResult, budget int) {
 	if len(r.Probes) == 0 {
 		return
 	}
+	section(b, "Зонды")
 
 	cityW, netW := 0, 0
 	for _, p := range r.Probes {
@@ -733,7 +754,7 @@ func writeProbes(b *strings.Builder, r *mtproxyl.CheckResult) {
 
 	tail := renderReasons(groupReasons(r.Probes))
 	// Запас в 24 знака — на служебную разметку блока и строку «…и ещё N».
-	budget := MessageLimit - len([]rune(b.String())) - len([]rune(tail)) - 24
+	budget -= len([]rune(b.String())) + len([]rune(tail)) + 24
 
 	rows := make([][]string, 0, len(r.Probes))
 	used := 0
@@ -750,7 +771,6 @@ func writeProbes(b *strings.Builder, r *mtproxyl.CheckResult) {
 		rows = append(rows, []string{mark + " " + city, net})
 	}
 
-	b.WriteString("\n")
 	b.WriteString(table(fmt.Sprintf("Зонды (%d)", len(r.Probes)),
 		[]string{"   Город", "Провайдер"}, nil, rows))
 	b.WriteString("\n")
