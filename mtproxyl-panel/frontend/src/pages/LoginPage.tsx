@@ -1,4 +1,5 @@
 import { useState, FormEvent } from 'react';
+import { useBranding } from '@/hooks/useBranding';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { Button } from '@/components/ui/button';
@@ -6,6 +7,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
 export function LoginPage() {
+  const { name } = useBranding();
+
   const { username, login } = useAuth();
   const [user, setUser] = useState('');
   const [password, setPassword] = useState('');
@@ -33,7 +36,7 @@ export function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-background">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
-          <h1 className="text-2xl font-bold text-text-primary">MTProxyL-Panel</h1>
+          <h1 className="text-2xl font-bold text-text-primary">{name}</h1>
           <p className="text-sm text-text-secondary mt-1">Управление MTProxy</p>
         </div>
 
