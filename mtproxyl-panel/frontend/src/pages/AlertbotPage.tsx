@@ -21,7 +21,7 @@ import { alertbotApi, type AlertbotStatus } from '@/lib/api';
  * Управление тем же CLI, что и у бота-администратора: панель показывает
  * состояние и нажимает кнопки.
  */
-export function AlertbotPanel() {
+export function AlertbotPanel({ onChanged }: { onChanged?: () => void | Promise<void> } = {}) {
   const [status, setStatus] = useState<AlertbotStatus | null>(null);
   const [supported, setSupported] = useState(true);
   const [message, setMessage] = useState('');
@@ -59,6 +59,9 @@ export function AlertbotPanel() {
     try {
       await fn();
       await load();
+      // Действия сторожа задевают и второго бота — страница сверху обязана
+      // это увидеть, иначе карточка выбора покажет вчерашнюю картину.
+      await onChanged?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Не удалось выполнить действие');
     } finally {
