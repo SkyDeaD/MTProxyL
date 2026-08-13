@@ -165,7 +165,7 @@ show_main_menu() {
             echo -e "  ${BRIGHT_CYAN}[5]${NC}   Логи и трафик"
             echo -e "  ${BRIGHT_CYAN}[6]${NC}   NFT лимитер, Zapret2 и фиксы"
             echo -e "  ${BRIGHT_CYAN}[7]${NC}   Обновление MTProxyL"
-            echo -e "  ${BRIGHT_CYAN}[8]${NC}   Телеграм бот  ${DIM}$(tgbot_status_line)${NC}"
+            echo -e "  ${BRIGHT_CYAN}[8]${NC}   Телеграм бот  ${DIM}$(bot_status_line)${NC}"
             echo -e "  ${BRIGHT_CYAN}[9]${NC}   Дополнения (утилиты)"
             echo -e "  ${BRIGHT_CYAN}[10]${NC}  Цель / режим (Manager ⇄ Reanimator)"
             echo -e "  ${BRIGHT_CYAN}[11]${NC}  Редактировать конфиг цели"
@@ -186,7 +186,7 @@ show_main_menu() {
                 5)  tui_traffic_menu ;;
                 6)  tui_nft_menu ;;
                 7)  tui_backup_menu ;;
-                8)  tui_tgbot_menu ;;
+                8)  tui_bot_menu ;;
                 9)  tui_addons_menu ;;
                 10) tui_target_menu ;;
                 11) edit_target_config || true; press_any_key ;;
@@ -208,7 +208,7 @@ show_main_menu() {
             echo -e "  ${BRIGHT_CYAN}[9]${NC}   Обновление и бэкапы"
             echo -e "  ${BRIGHT_CYAN}[10]${NC}  Режим эксперта (override поверх config.toml)"
             echo -e "  ${BRIGHT_CYAN}[11]${NC}  Режим супер эксперта (свой config.toml)"
-            echo -e "  ${BRIGHT_CYAN}[12]${NC}  Телеграм бот  ${DIM}$(tgbot_status_line)${NC}"
+            echo -e "  ${BRIGHT_CYAN}[12]${NC}  Телеграм бот  ${DIM}$(bot_status_line)${NC}"
             echo -e "  ${BRIGHT_CYAN}[13]${NC}  Дополнения (утилиты)"
             echo -e "  ${BRIGHT_CYAN}[14]${NC}  Цель / режим (Manager ⇄ Reanimator)"
             echo -e "  ${BRIGHT_CYAN}[15]${NC}  Информация"
@@ -230,7 +230,7 @@ show_main_menu() {
                 9)  tui_backup_menu ;;
                 10) tui_expert_menu ;;
                 11) tui_superexpert_menu ;;
-                12) tui_tgbot_menu ;;
+                12) tui_bot_menu ;;
                 13) tui_addons_menu ;;
                 14) tui_target_menu ;;
                 15) show_server_info; press_any_key ;;

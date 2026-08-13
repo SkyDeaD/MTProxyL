@@ -43,6 +43,11 @@ AVAILABILITY_HOST=""
 AVAILABILITY_PORT=""
 AVAILABILITY_SNI=""
 
+# Какой телеграм-бот выбран: none, admin (бот-администратор) или alert
+# (сторож). Включённым может быть только один — два бота в одном чате
+# означали бы два опросчика на один токен и путаницу в том, кто чем управляет.
+TGBOT_VARIANT="none"
+
 # Режим супер эксперта: конфиг движка ведёт пользователь вручную,
 # менеджер только копирует его файл на место config.toml
 SUPEREXPERT_ENABLED="false"
@@ -145,6 +150,9 @@ AVAILABILITY_THRESHOLD='${AVAILABILITY_THRESHOLD}'
 AVAILABILITY_HOST='${AVAILABILITY_HOST}'
 AVAILABILITY_PORT='${AVAILABILITY_PORT}'
 AVAILABILITY_SNI='${AVAILABILITY_SNI}'
+
+# Выбранный телеграм-бот
+TGBOT_VARIANT='${TGBOT_VARIANT}'
 
 # Selfmask
 SELFMASK_ENABLED='${SELFMASK_ENABLED}'
@@ -341,6 +349,7 @@ load_settings() {
                 BACKUP_RETENTION_DAYS|IP_HISTORY_LIMIT|IP_HISTORY_INTERVAL|\
                 AVAILABILITY_ENABLED|AVAILABILITY_INTERVAL|AVAILABILITY_PROBES|\
                 AVAILABILITY_THRESHOLD|AVAILABILITY_HOST|AVAILABILITY_PORT|AVAILABILITY_SNI|\
+                TGBOT_VARIANT|\
                 SELFMASK_ENABLED|SELFMASK_DOMAIN|SELFMASK_SITE_SOURCE|SELFMASK_SITE_DIR|\
                 SELFMASK_NGINX_BACKEND_PORT|SELFMASK_CERT_EMAIL|SELFMASK_NGINX_SITE_NAME|\
                 SELFMASK_AUTO_RENEW|SELFMASK_TLS_PROTOCOLS|SELFMASK_CERT_MODE|\

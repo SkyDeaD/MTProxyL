@@ -67,7 +67,7 @@ fi
 
 # Загрузка библиотек
 LIB_DIR="${INSTALL_DIR}/lib"
-for _lib in colors utils settings detect secrets config docker engine traffic availability geoblock geoip upstream backup nft selfmask panel tgbot tui_main tui_proxy tui_secrets tui_links tui_settings tui_security tui_traffic tui_engine tui_backup tui_expert tui_nft tui_selfmask tui_addons tui_tgbot tui_detect expert_catalog expert_mode settings_cli install; do
+for _lib in colors utils settings detect secrets config docker engine traffic availability geoblock geoip upstream backup nft selfmask panel tgbot alertbot tui_main tui_proxy tui_secrets tui_links tui_settings tui_security tui_traffic tui_engine tui_backup tui_expert tui_nft tui_selfmask tui_addons tui_tgbot tui_alertbot tui_detect expert_catalog expert_mode settings_cli install; do
     if [ -f "${LIB_DIR}/${_lib}.sh" ]; then
         # shellcheck source=/dev/null
         source "${LIB_DIR}/${_lib}.sh"
@@ -450,6 +450,14 @@ cli_main() {
             # будет работать.
             load_settings 2>/dev/null
             handle_tgbot_command "$@"
+            ;;
+
+        alertbot)
+            # Второй вариант бота: только тревоги, без управления прокси.
+            # Настройки нужны для порта API движка и пути к скрипту.
+            load_settings 2>/dev/null
+            load_detect_settings 2>/dev/null
+            handle_alertbot_command "$@"
             ;;
 
         availability)

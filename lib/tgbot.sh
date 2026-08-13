@@ -605,6 +605,10 @@ tgbot_install() {
     systemctl restart "$TGBOT_SERVICE"
     sleep 3
 
+    # Включённым может быть только один бот: два опросчика в одном чате — это
+    # путаница в том, кто чем управляет, и лишний расход на пустом месте.
+    tgbot_take_over
+
     if tgbot_service_active; then
         log_success "Бот запущен"
         # Повторяем в итоге: предупреждение о qrencode осталось в самом начале
@@ -619,6 +623,19 @@ tgbot_install() {
         journalctl -u "$TGBOT_SERVICE" -n 15 --no-pager 2>/dev/null | sed 's/^/    /'
     fi
     echo ""
+}
+
+# take_over переводит выбор на бота-администратора и останавливает сторожа.
+# Не удаляет его: там настройки, которые человек заводил руками.
+tgbot_take_over() {
+    if declare -f alertbot_installed >/dev/null 2>&1 && alertbot_installed; then
+        if systemctl is-active "$ALERTBOT_SERVICE" &>/dev/null; then
+            log_info "Останавливаю алерт-бота: включённым может быть только один"
+            systemctl disable --now "$ALERTBOT_SERVICE" >/dev/null 2>&1
+        fi
+    fi
+    TGBOT_VARIANT="admin"
+    save_settings 2>/dev/null || true
 }
 
 tgbot_setup() {
@@ -719,6 +736,10 @@ tgbot_uninstall() {
     systemctl daemon-reload 2>/dev/null
     rm -rf "$TGBOT_DIR"
     userdel "$TGBOT_USER" 2>/dev/null || true
+    if [ "${TGBOT_VARIANT:-}" = "admin" ]; then
+        TGBOT_VARIANT="none"
+        save_settings 2>/dev/null || true
+    fi
     log_success "Телеграм-бот удалён"
 }
 
