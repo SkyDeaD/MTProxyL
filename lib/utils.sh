@@ -389,9 +389,29 @@ read_choice() {
     echo "$choice"
 }
 
+# authorship_line — подпись автора, а у форка ещё и его имя. Одна функция на
+# все экраны: расходиться формулировкам тут негде, а понимать, что установлено,
+# человеку нужно — за поддержкой он пойдёт к разным людям.
+#
+# Имя форка берётся из ${INSTALL_DIR}/.repo, а не из константы: тогда любой
+# форк подписывается сам, а на официальной установке файла нет и строка
+# остаётся прежней, слово в слово.
+authorship_line() {
+    local _owner=""
+    if [ -r "${INSTALL_DIR}/.repo" ]; then
+        _owner=$(tr -cd 'A-Za-z0-9._/-' < "${INSTALL_DIR}/.repo" 2>/dev/null)
+        _owner="${_owner%%/*}"
+    fi
+    if [ -n "$_owner" ] && [ "$_owner" != "Liafanx" ]; then
+        printf 'by LiafanX · форк %s' "$_owner"
+    else
+        printf 'by LiafanX'
+    fi
+}
+
 clear_screen() {
     clear 2>/dev/null || printf '\033[2J\033[H'
-    echo -e "${BRIGHT_CYAN}${BOLD}  MTProxyL${NC} ${DIM}v${VERSION}${NC} ${DIM}by LiafanX${NC}"
+    echo -e "${BRIGHT_CYAN}${BOLD}  MTProxyL${NC} ${DIM}v${VERSION}${NC} ${DIM}$(authorship_line)${NC}"
     echo -e "  ${DIM}$(_repeat '─' 30)${NC}"
 }
 

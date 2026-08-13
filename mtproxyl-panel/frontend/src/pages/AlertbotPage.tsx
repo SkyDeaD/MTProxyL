@@ -149,6 +149,16 @@ export function AlertbotPanel() {
                   <Square className="h-4 w-4" /> Остановить
                 </Button>
               )}
+              {!serviceUp && configured && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => void act(() => alertbotApi.activate())}
+                >
+                  Сделать активным
+                </Button>
+              )}
               <Button
                 size="sm"
                 variant="outline"

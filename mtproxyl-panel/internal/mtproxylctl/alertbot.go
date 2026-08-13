@@ -141,6 +141,41 @@ func (c *Client) AlertbotService(ctx context.Context, action string) (string, er
 	}
 }
 
+// AlertbotActivate делает сторожа рабочим ботом, а бота-администратора —
+// остановленным. Именно enable, а не только start: без него после перезагрузки
+// сервера поднимется прежний, и человек узнает об этом, когда тревоги не
+// придут.
+//
+// Панель делает это сама, а не подкомандой MTProxyL: сторож ставится и поверх
+// официального скрипта, где таких подкоманд нет.
+func (c *Client) AlertbotActivate(ctx context.Context) (string, error) {
+	// Чужого останавливаем первым: две службы в одном чате — это два опросчика
+	// на один токен и путаница в том, кто отвечает.
+	if _, err := c.run(ctx, "tgbot", "stop"); err != nil {
+		// Бот-администратор может быть не установлен вовсе — это не помеха.
+		if !errors.Is(err, ErrTgbotUnsupported) {
+			var ce *CommandError
+			if !errors.As(err, &ce) {
+				return "", err
+			}
+		}
+	}
+	if _, err := c.sudo(ctx, time.Minute, "systemctl", "enable", alertbotService); err != nil {
+		return "", err
+	}
+	return c.sudo(ctx, time.Minute, "systemctl", "restart", alertbotService)
+}
+
+// TgbotActivate — зеркало: поднимает бота-администратора и глушит сторожа.
+func (c *Client) TgbotActivate(ctx context.Context) (string, error) {
+	if _, err := c.sudo(ctx, time.Minute, "systemctl", "disable", alertbotService); err != nil {
+		// Сторожа может не быть — тогда и выключать нечего.
+		_ = err
+	}
+	_, _ = c.sudo(ctx, time.Minute, "systemctl", "stop", alertbotService)
+	return c.run(ctx, "tgbot", "start")
+}
+
 func (c *Client) AlertbotUninstall(ctx context.Context) (string, error) {
 	return c.sudo(ctx, time.Minute, "sh", alertbotInstaller, "--uninstall")
 }

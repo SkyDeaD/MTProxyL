@@ -12,7 +12,7 @@ show_banner() {
     ██║ ╚═╝ ██║   ██║   ██║     ██║  ██║╚██████╔╝██╔╝ ██╗   ██║   ███████╗
     ╚═╝     ╚═╝   ╚═╝   ╚═╝     ╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝   ╚═╝   ╚══════╝
 BANNER
-    echo -e "    ${BOLD}MTProxyL v${VERSION}${NC} ${DIM}by LiafanX${NC}"
+    echo -e "    ${BOLD}MTProxyL v${VERSION}${NC} ${DIM}$(authorship_line)${NC}"
     echo -e "${NC}"
 }
 

@@ -712,6 +712,9 @@ export const tgbotApi = {
       method: 'PUT',
       body: JSON.stringify({ key, value }),
     }),
+  /** Сделать бота-администратора рабочим; сторож при этом останавливается. */
+  activate: () =>
+    request<TgbotStatusResponse>(TGBOT_BASE, '/activate', { method: 'POST' }),
 };
 
 // ── Бот-сторож ──────────────────────────────────────────────────────────────
@@ -765,6 +768,9 @@ export const alertbotApi = {
     }),
   uninstall: () =>
     request<{ output: string }>(ALERTBOT_BASE, '/uninstall', { method: 'POST' }),
+  /** Сделать сторожа рабочим ботом; бот-администратор при этом останавливается. */
+  activate: () =>
+    request<AlertbotStatusResponse>(ALERTBOT_BASE, '/activate', { method: 'POST' }),
   set: (key: string, value: string) =>
     request<AlertbotStatusResponse>(ALERTBOT_BASE, '/settings', {
       method: 'PUT',

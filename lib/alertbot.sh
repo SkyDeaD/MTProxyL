@@ -151,18 +151,23 @@ _alertbot_fetch_binary() {
         return 1
     fi
 
+    # Сумму берём из общего checksums.txt: его имя в релизе постоянно, а имя
+    # отдельного файла зависит от того, как назван архив, — на этом мы уже
+    # однажды промахнулись, и проверка молча не выполнялась.
     if command -v sha256sum >/dev/null 2>&1; then
-        if curl -fsSL "https://github.com/${ALERTBOT_REPO}/releases/download/${_tag}/${_tar}.sha256" \
-                -o "${_tmpdir}/sum" 2>/dev/null; then
-            _sum=$(awk '{print $1}' "${_tmpdir}/sum")
+        if curl -fsSL "https://github.com/${ALERTBOT_REPO}/releases/download/${_tag}/checksums.txt" \
+                -o "${_tmpdir}/sums" 2>/dev/null; then
+            _sum=$(grep " ${_tar}\$" "${_tmpdir}/sums" | awk '{print $1}' | head -1)
             _actual=$(sha256sum "${_tmpdir}/${_tar}" | awk '{print $1}')
-            if [ -n "$_sum" ] && [ "$_sum" != "$_actual" ]; then
+            if [ -z "$_sum" ]; then
+                log_warn "В checksums.txt нет строки про ${_tar} — проверка пропущена"
+            elif [ "$_sum" != "$_actual" ]; then
                 rm -rf "$_tmpdir"
                 log_error "Контрольная сумма не сошлась — файл повреждён или подменён"
                 return 1
             fi
         else
-            log_warn "Контрольной суммы в релизе нет — проверка пропущена"
+            log_warn "Контрольных сумм в релизе нет — проверка пропущена"
         fi
     fi
 
@@ -341,8 +346,36 @@ alertbot_install() {
     return 0
 }
 
-# take_over переводит выбор на себя и останавливает чужого бота: сносить его
-# молча нельзя — там настройки и права, которые человек заводил руками.
+# bot_use_alert делает сторожа активным: включает его и останавливает чужого.
+#
+# Именно enable, а не только start: без него после перезагрузки сервера
+# поднимется прежний бот, и человек узнает об этом, когда тревоги не придут.
+# Чужого останавливаем, но не сносим — там настройки и права, заведённые
+# руками.
+bot_use_alert() {
+    alertbot_installed || { log_error "Бот-сторож не установлен"; return 1; }
+
+    if declare -f tgbot_installed >/dev/null 2>&1 && tgbot_installed; then
+        log_info "Останавливаю бота-администратора: включённым может быть только один"
+        systemctl disable --now "$TGBOT_SERVICE" >/dev/null 2>&1 || true
+    fi
+
+    systemctl enable "$ALERTBOT_SERVICE" >/dev/null 2>&1 || true
+    systemctl restart "$ALERTBOT_SERVICE" >/dev/null 2>&1 || true
+
+    TGBOT_VARIANT="alert"
+    save_settings 2>/dev/null || true
+
+    if alertbot_service_active; then
+        log_success "Активен бот-сторож"
+    else
+        log_warn "Сторож не поднялся — journalctl -u ${ALERTBOT_SERVICE} -n 50"
+        return 1
+    fi
+}
+
+# take_over — то же самое, но зовётся из установки, когда служба поднимается
+# сразу после и перезапускать её отдельно незачем.
 alertbot_take_over() {
     if declare -f tgbot_installed >/dev/null 2>&1 && tgbot_installed; then
         if systemctl is-active "$TGBOT_SERVICE" &>/dev/null; then
@@ -440,6 +473,7 @@ handle_alertbot_command() {
         update)    alertbot_update ;;
         uninstall) alertbot_uninstall "$@" ;;
         set)       alertbot_set_param "$@" ;;
+        use|activate) bot_use_alert ;;
         start)     systemctl start "$ALERTBOT_SERVICE" && log_success "Запущен" ;;
         stop)      systemctl stop "$ALERTBOT_SERVICE" && log_success "Остановлен" ;;
         restart)   systemctl restart "$ALERTBOT_SERVICE" && log_success "Перезапущен" ;;

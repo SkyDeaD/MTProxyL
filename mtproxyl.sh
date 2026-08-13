@@ -563,7 +563,7 @@ cli_main() {
             fi
             # Если стоим не на релизной ветке — это важно видеть сразу
             [ "$GITHUB_BRANCH" != "main" ] && echo -e "  ${YELLOW}Ветка обновлений: ${GITHUB_BRANCH}${NC}"
-            echo -e "  ${DIM}by LiafanX${NC}"
+            echo -e "  ${DIM}$(authorship_line)${NC}"
             ;;
 
         help|--help|-h)
