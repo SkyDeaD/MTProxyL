@@ -32,7 +32,16 @@ STATS_DIR="${INSTALL_DIR}/relay_stats"
 CONNECTION_LOG="${INSTALL_DIR}/connection.log"
 CONTAINER_NAME="mtproxyl"
 DOCKER_IMAGE_BASE="mtproxyl-telemt"
-GITHUB_REPO="Liafanx/MTProxyL"
+# Репозиторий, из которого идут обновления. По умолчанию — официальный; если
+# установка шла из форка, его имя лежит в ${INSTALL_DIR}/.repo и обновления
+# идут оттуда же. Без этого первый же `mtproxyl update` возвращал бы файлы
+# оригинала и уносил всё, чего в нём нет, — а человек узнавал бы об этом по
+# пропавшему пункту меню.
+GITHUB_REPO="${MTPROXYL_REPO:-}"
+if [ -z "$GITHUB_REPO" ] && [ -r "${INSTALL_DIR}/.repo" ]; then
+    GITHUB_REPO=$(tr -cd 'A-Za-z0-9._/-' < "${INSTALL_DIR}/.repo" 2>/dev/null)
+fi
+[ -n "$GITHUB_REPO" ] || GITHUB_REPO="Liafanx/MTProxyL"
 # Ветка, из которой берутся обновления и библиотеки при self-update.
 # Релизная — main; если установка шла из другой ветки, её имя лежит
 # в ${INSTALL_DIR}/.branch и обновления идут оттуда же.

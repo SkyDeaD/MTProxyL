@@ -17,6 +17,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"os"
 	"os/signal"
 	"syscall"
 	"time"
@@ -42,6 +43,12 @@ func main() {
 	if *showVersion {
 		fmt.Println("mtproxyl-alertbot", version)
 		return
+	}
+
+	// Подкоманда config — единственный способ поправить настройки там, где нет
+	// ни панели, ни меню MTProxyL: сторож ставится и поверх оригинала.
+	if args := flag.Args(); len(args) > 0 && args[0] == "config" {
+		os.Exit(runConfig(*configPath, args[1:]))
 	}
 
 	log.SetFlags(log.LstdFlags)
@@ -132,6 +139,7 @@ func deps(store *config.Store, cli *mtproxyl.Client, poller *mtproxyl.Poller, wa
 		},
 		Interval:            interval(poller),
 		UplinkSnapshot:      watcher.Snapshot,
+		UplinkInterval:      uplink.DefaultInterval,
 		AvailabilityEnabled: true,
 		Persist:             persist(store),
 	}
