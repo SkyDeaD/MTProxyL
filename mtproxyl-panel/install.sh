@@ -816,12 +816,26 @@ do_install() {
     # The panel shares a repository with MTProxyL, so /releases/latest would
     # return an MTProxyL release that carries no panel assets. Pick the newest
     # tag with the panel prefix instead.
-    _releases=$(curl -fsSL "https://api.github.com/repos/$REPO/releases?per_page=100") \
-      || die "Не удалось обратиться к API GitHub"
-    # Пустой результат — это «релизов панели пока нет», а не сбой сети:
-    # grep вернул бы ненулевой код и увёл в неверное сообщение.
-    TAG=$(printf '%s\n' "$_releases" | grep '"tag_name"' | cut -d'"' -f4 \
-      | grep "^${RELEASE_TAG_PREFIX}" | head -1 || true)
+    #
+    # Но сперва всё же спрашиваем /releases/latest: GitHub считает его по дате
+    # публикации, и если репозиторий выпускает только панель (форк), ответ
+    # сразу верный. Список ниже — запасной путь для репозитория, где рядом
+    # живут релизы самого MTProxyL.
+    TAG=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null \
+      | grep '"tag_name"' | cut -d'"' -f4 | grep "^${RELEASE_TAG_PREFIX}" | head -1 || true)
+
+    if [ -z "$TAG" ]; then
+      _releases=$(curl -fsSL "https://api.github.com/repos/$REPO/releases?per_page=100") \
+        || die "Не удалось обратиться к API GitHub"
+      # Пустой результат — это «релизов панели пока нет», а не сбой сети:
+      # grep вернул бы ненулевой код и увёл в неверное сообщение.
+      #
+      # sort -V, а не head -1 по выдаче API: порядок там не по дате, а
+      # лексикографическое сравнение ставит «-tg9» выше «-tg12», из-за чего
+      # свежие сборки становятся недостижимы.
+      TAG=$(printf '%s\n' "$_releases" | grep '"tag_name"' | cut -d'"' -f4 \
+        | grep "^${RELEASE_TAG_PREFIX}" | sort -V | tail -1 || true)
+    fi
     if [ -z "$TAG" ]; then
       say "Релизов ${RELEASE_TAG_PREFIX}* в $REPO не найдено."
       say "Панель выпускается отдельно от MTProxyL. Опубликуйте тег"
@@ -1196,7 +1210,11 @@ session_ttl = \"24h\"${TLS_BLOCK}"
   generate_service | write_root "$SERVICE_FILE"
   $SUDO systemctl daemon-reload
   $SUDO systemctl enable "$SERVICE_NAME"
-  $SUDO systemctl start "$SERVICE_NAME"
+  # restart, а не start: при переустановке поверх работающей панели бинарник на
+  # диске уже подменён, но systemd для активного юнита ничего не делает — и в
+  # памяти остаётся прежний процесс со старым вшитым интерфейсом. Со стороны
+  # это выглядит как «установщик соврал».
+  $SUDO systemctl restart "$SERVICE_NAME"
   say "Служба $SERVICE_NAME запущена и включена в автозагрузку"
 
   # Порт 80 занят — выпуск сертификата умеет только MTProxyL (см. выше).

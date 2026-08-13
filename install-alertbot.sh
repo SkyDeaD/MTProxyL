@@ -145,15 +145,15 @@ if [ -f "$SETTINGS" ]; then
     [ -n "$_p" ] && API_PORT="$_p"
 fi
 
-# Заголовок авторизации читаем прямо из конфига движка — тем же способом, что
-# и установщик панели: в settings.conf его нет намеренно, тот файл читается
-# всем миром.
-ENGINE_CONFIG=""
-for _c in /etc/telemt/config.toml "${MTPROXYL_DIR}/config.toml" /opt/telemt/config.toml; do
-    [ -f "$_c" ] && { ENGINE_CONFIG="$_c"; break; }
-done
+# Путь к конфигу движка спрашиваем у самого MTProxyL. Угадывать его нельзя:
+# в режиме менеджера он лежит в подкаталоге mtproxy, в реаниматоре это вообще
+# чужой файл в произвольном месте, — а из-за одного промаха в списке путей
+# заголовок авторизации не находился никогда.
+ENGINE_CONFIG=$("$SCRIPT" mode --json 2>/dev/null \
+    | grep -m1 '^{' \
+    | sed -n 's/.*"engine_config"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
 API_AUTH=""
-if [ -n "$ENGINE_CONFIG" ]; then
+if [ -n "$ENGINE_CONFIG" ] && [ -f "$ENGINE_CONFIG" ]; then
     API_AUTH=$(sed -n "/^[[:space:]]*\[server\.api\]/,/^[[:space:]]*\[/p" "$ENGINE_CONFIG" 2>/dev/null \
         | sed -n "s/^[[:space:]]*auth_header[[:space:]]*=[[:space:]]*['\"]\(.*\)['\"].*/\1/p" | head -1)
 fi
@@ -178,14 +178,21 @@ curl -fsSL "https://github.com/${REPO}/releases/download/${TAG}/${TAR}" -o "${TM
 
 # Сверка контрольной суммы: оборванная закачка иначе молча превратилась бы в
 # неработающую службу.
+# Сумму берём из общего checksums.txt: его имя в релизе постоянно, а имя
+# отдельного файла с суммой зависит от того, как назван архив, — и однажды мы
+# уже промахнулись, попросив «<архив>.tar.gz.sha256» вместо «<архив>.sha256».
 if command -v sha256sum >/dev/null 2>&1; then
-    if curl -fsSL "https://github.com/${REPO}/releases/download/${TAG}/${TAR}.sha256" -o "${TMP}/sum" 2>/dev/null; then
-        _want=$(awk '{print $1}' "${TMP}/sum")
-        _have=$(sha256sum "${TMP}/${TAR}" | awk '{print $1}')
-        [ "$_want" = "$_have" ] || die "контрольная сумма не сошлась — файл повреждён или подменён"
-        ok "Контрольная сумма сошлась"
+    if curl -fsSL "https://github.com/${REPO}/releases/download/${TAG}/checksums.txt" -o "${TMP}/sums" 2>/dev/null; then
+        _want=$(grep " ${TAR}\$" "${TMP}/sums" | awk '{print $1}' | head -1)
+        if [ -z "$_want" ]; then
+            warn "в checksums.txt нет строки про ${TAR} — проверка пропущена"
+        else
+            _have=$(sha256sum "${TMP}/${TAR}" | awk '{print $1}')
+            [ "$_want" = "$_have" ] || die "контрольная сумма не сошлась — файл повреждён или подменён"
+            ok "Контрольная сумма сошлась"
+        fi
     else
-        warn "контрольной суммы в релизе нет — проверка пропущена"
+        warn "контрольных сумм в релизе нет — проверка пропущена"
     fi
 fi
 

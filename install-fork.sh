@@ -130,16 +130,22 @@ if [ "$WITH_PANEL" = "yes" ] && [ -x /usr/local/bin/mtproxyl-panel ]; then
     say ""
     say "Обновляю панель до сборки форка"
     _pan=$(mktemp)
+    _log=$(mktemp)
     if curl -fsSL "${RAW}/mtproxyl-panel/install.sh" -o "$_pan"; then
-        if MTPROXYL_PANEL_REPO="$REPO" sh "$_pan" install >/dev/null 2>&1; then
+        if MTPROXYL_PANEL_REPO="$REPO" sh "$_pan" install >"$_log" 2>&1; then
             ok "Панель обновлена — в ней появился раздел бота-сторожа"
         else
-            warn "панель обновить не удалось: MTPROXYL_PANEL_REPO=${REPO} sh ${_pan} install"
+            # Показываем хвост вывода: тихое «не удалось» на месте провала —
+            # худшее, что может сделать установщик, человеку потом нечего
+            # прислать в поддержку.
+            warn "панель обновить не удалось, последние строки вывода:"
+            tail -n 15 "$_log" | sed 's/^/      /' >&2
+            warn "повторить: MTPROXYL_PANEL_REPO=${REPO} sh ${_pan} install"
         fi
     else
         warn "установщик панели не скачался"
     fi
-    rm -f "$_pan"
+    rm -f "$_pan" "$_log"
 elif [ "$WITH_PANEL" = "yes" ]; then
     say ""
     say "Панель не установлена — пропускаю. Поставить: mtproxyl panel install"
