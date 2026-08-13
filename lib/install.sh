@@ -5,7 +5,7 @@ run_installer() {
     show_banner
 
     echo -e "  ${BRIGHT_GREEN}Добро пожаловать в MTProxyL — менеджер Telegram MTProto прокси${NC}"
-    echo -e "  ${DIM}by LiafanX${NC}"
+    echo -e "  ${DIM}$(authorship_line)${NC}"
     echo ""
 
     check_root

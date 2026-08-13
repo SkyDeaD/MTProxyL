@@ -604,6 +604,12 @@ $SYSTEM_USER ALL=(root) NOPASSWD: /opt/mtproxyl-alertbot/mtproxyl-alertbot confi
 $SYSTEM_USER ALL=(root) NOPASSWD: /bin/sh /opt/mtproxyl-alertbot/install-alertbot.sh
 $SYSTEM_USER ALL=(root) NOPASSWD: /bin/sh /opt/mtproxyl-alertbot/install-alertbot.sh --token [0-9]* --chat *
 $SYSTEM_USER ALL=(root) NOPASSWD: /bin/sh /opt/mtproxyl-alertbot/install-alertbot.sh --uninstall
+# Выбор активного бота: включённым может быть только один, поэтому панели нужны
+# и enable, и disable — без них после перезагрузки поднялся бы прежний.
+$SYSTEM_USER ALL=(root) NOPASSWD: /bin/systemctl enable mtproxyl-alertbot.service
+$SYSTEM_USER ALL=(root) NOPASSWD: /bin/systemctl disable mtproxyl-alertbot.service
+$SYSTEM_USER ALL=(root) NOPASSWD: /usr/bin/systemctl enable mtproxyl-alertbot.service
+$SYSTEM_USER ALL=(root) NOPASSWD: /usr/bin/systemctl disable mtproxyl-alertbot.service
 EOF
 
   if [ -n "$_visudo" ]; then

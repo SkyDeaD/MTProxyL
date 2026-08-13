@@ -154,8 +154,8 @@ export function TgbotPage() {
         {switcher}
         <p className="text-xs text-text-secondary">
           Сторож не управляет прокси: он держит в чате одно живое сообщение и будит звуком,
-          когда прокси перестал работать — снаружи или изнутри. Включённым может быть только
-          один бот, поэтому установка сторожа остановит бота-администратора.
+          когда прокси перестал работать — снаружи или изнутри. Работать может только один
+          бот: кнопка «Сделать активным» запускает выбранного и останавливает другого.
         </p>
         <AlertbotPanel />
       </div>
@@ -224,6 +224,12 @@ export function TgbotPage() {
                 <Button size="sm" variant="outline" disabled={busy} className="gap-2"
                   onClick={() => void act(() => tgbotApi.service('stop'))}>
                   <Square className="h-4 w-4" /> Остановить
+                </Button>
+              )}
+              {!serviceUp && configured && (
+                <Button size="sm" variant="outline" disabled={busy}
+                  onClick={() => void act(() => tgbotApi.activate())}>
+                  Сделать активным
                 </Button>
               )}
               <Button size="sm" variant="outline" disabled={busy}

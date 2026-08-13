@@ -625,6 +625,30 @@ tgbot_install() {
     echo ""
 }
 
+# bot_use_admin делает бота-администратора активным: включает его и
+# останавливает сторожа. Зеркало bot_use_alert из lib/alertbot.sh.
+bot_use_admin() {
+    tgbot_installed || { log_error "Телеграм-бот не установлен"; return 1; }
+
+    if declare -f alertbot_installed >/dev/null 2>&1 && alertbot_installed; then
+        log_info "Останавливаю бота-сторожа: включённым может быть только один"
+        systemctl disable --now "$ALERTBOT_SERVICE" >/dev/null 2>&1 || true
+    fi
+
+    systemctl enable "$TGBOT_SERVICE" >/dev/null 2>&1 || true
+    systemctl restart "$TGBOT_SERVICE" >/dev/null 2>&1 || true
+
+    TGBOT_VARIANT="admin"
+    save_settings 2>/dev/null || true
+
+    if tgbot_service_active; then
+        log_success "Активен бот-администратор"
+    else
+        log_warn "Бот не поднялся — journalctl -u ${TGBOT_SERVICE} -n 50"
+        return 1
+    fi
+}
+
 # take_over переводит выбор на бота-администратора и останавливает сторожа.
 # Не удаляет его: там настройки, которые человек заводил руками.
 tgbot_take_over() {
@@ -770,6 +794,7 @@ handle_tgbot_command() {
         setup)      tgbot_setup ;;
         uninstall)  tgbot_uninstall "${1:-}" ;;
         set)        check_root; tgbot_set_param "${1:-}" "${2:-}" ;;
+        use|activate) check_root; bot_use_admin ;;
         update)     check_root; tgbot_update_sources && log_success "Код бота обновлён" ;;
         start)      check_root; systemctl start "$TGBOT_SERVICE" && log_success "Запущен" ;;
         stop)       check_root; systemctl stop "$TGBOT_SERVICE" && log_success "Остановлен" ;;

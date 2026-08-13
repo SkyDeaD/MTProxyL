@@ -1,39 +1,6 @@
 #!/bin/bash
 # MTProxyL — подменю: алерт-бот (сторож).
 
-# Экран выбора. Показывается, когда ни один бот не установлен: два бота решают
-# разные задачи, и человек должен понимать, какую выбирает, а не гадать.
-tui_bot_choice_menu() {
-    while true; do
-        clear_screen
-        draw_header "ТЕЛЕГРАМ БОТ"
-        echo ""
-        echo -e "  ${DIM}Ботов два, и включённым может быть только один.${NC}"
-        echo ""
-        echo -e "  ${BOLD}Бот-администратор${NC} ${DIM}— управление прокси кнопками в чате:${NC}"
-        echo -e "  ${DIM}пользователи, ссылки с QR, трафик, бэкапы. Уведомляет, когда${NC}"
-        echo -e "  ${DIM}доступность упала или прокси перестал отвечать.${NC}"
-        echo ""
-        echo -e "  ${BOLD}Бот-сторож${NC} ${DIM}— только наблюдение, зато в обе стороны: и${NC}"
-        echo -e "  ${DIM}доступность из России, и связь прокси с дата-центрами Telegram.${NC}"
-        echo -e "  ${DIM}Второе важно: фильтрация чаще режет выход, и тогда зонды${NC}"
-        echo -e "  ${DIM}показывают 95%, а клиенты не работают. Держит в чате одно${NC}"
-        echo -e "  ${DIM}живое сообщение и звонит, когда прокси перестал работать.${NC}"
-        echo ""
-        echo -e "  ${GREEN}[1]${NC}  Установить бота-администратора"
-        echo -e "  ${GREEN}[2]${NC}  Установить бота-сторожа"
-        echo ""
-        echo -e "  ${DIM}[0]${NC}  Назад"
-        echo ""
-        local c; c=$(read_choice "выбор" "0")
-        case "$c" in
-            1) tgbot_install; press_any_key; return ;;
-            2) tui_alertbot_install; press_any_key; return ;;
-            0|"") return ;;
-        esac
-    done
-}
-
 # Установка сторожа из меню: спрашиваем то же, что спрашивает бот-администратор.
 tui_alertbot_install() {
     echo ""
@@ -135,47 +102,97 @@ _tui_alertbot_timezone() {
     press_any_key
 }
 
-# Точка входа из главного меню: ведёт туда, где человек сейчас находится.
+# Точка входа из главного меню. Всегда экран выбора, а не угадывание: ботов
+# два, и человек, поставивший одного, должен видеть второго — иначе он про него
+# просто не узнает.
 tui_bot_menu() {
-    if alertbot_installed && ! tgbot_installed; then
-        tui_alertbot_menu
-    elif tgbot_installed && ! alertbot_installed; then
-        tui_tgbot_menu
-    elif tgbot_installed && alertbot_installed; then
-        _tui_bot_switch_menu
-    else
-        tui_bot_choice_menu
-    fi
-}
-
-# Оба установлены — редкий случай, но возможный: человек попробовал один,
-# потом другой. Тогда меню спрашивает, к какому идти.
-_tui_bot_switch_menu() {
     while true; do
         clear_screen
         draw_header "ТЕЛЕГРАМ БОТ"
         echo ""
-        echo -e "  ${DIM}Установлены оба. Работать может только один — сейчас это:${NC}"
-        echo -e "  ${BOLD}$([ "${TGBOT_VARIANT:-none}" = "alert" ] && echo "бот-сторож" || echo "бот-администратор")${NC}"
+
+        local _active _admin_mark="" _alert_mark=""
+        _active=$(_bot_active_variant)
+        case "$_active" in
+            admin) _admin_mark="  ${GREEN}◄ активен${NC}" ;;
+            alert) _alert_mark="  ${GREEN}◄ активен${NC}" ;;
+        esac
+
+        echo -e "  ${DIM}Работать может только один. Сейчас активен:${NC} ${BOLD}$(_bot_variant_name "$_active")${NC}"
         echo ""
-        echo -e "  ${CYAN}[1]${NC}  Бот-администратор  ${DIM}$(tgbot_status_line)${NC}"
-        echo -e "  ${CYAN}[2]${NC}  Бот-сторож  ${DIM}$(alertbot_status_line)${NC}"
+        echo -e "  ${CYAN}[1]${NC}  Бот-администратор   ${DIM}$(tgbot_status_line)${NC}${_admin_mark}"
+        echo -e "       ${DIM}управление прокси кнопками в чате: пользователи, ссылки, трафик${NC}"
         echo ""
+        echo -e "  ${CYAN}[2]${NC}  Бот-сторож          ${DIM}$(alertbot_status_line)${NC}${_alert_mark}"
+        echo -e "       ${DIM}тревоги: доступность из РФ и связь прокси с дата-центрами${NC}"
+        echo ""
+
+        # Переключать есть на что только когда установлены оба: иначе пункт
+        # обещал бы то, чего сделать нельзя.
+        local _switch=""
+        if tgbot_installed && alertbot_installed; then
+            if [ "$_active" = "alert" ]; then
+                _switch="admin"
+                echo -e "  ${CYAN}[3]${NC}  Сделать активным бота-администратора"
+            else
+                _switch="alert"
+                echo -e "  ${CYAN}[3]${NC}  Сделать активным бота-сторожа"
+            fi
+            echo ""
+        fi
+
         echo -e "  ${DIM}[0]${NC}  Назад"
         echo ""
+
         local c; c=$(read_choice "выбор" "0")
         case "$c" in
             1) tui_tgbot_menu ;;
             2) tui_alertbot_menu ;;
+            3)
+                [ -n "$_switch" ] || continue
+                if [ "$_switch" = "alert" ]; then
+                    bot_use_alert
+                else
+                    bot_use_admin
+                fi
+                press_any_key ;;
             0|"") return ;;
         esac
     done
 }
 
+# _bot_active_variant отвечает, кто работает НА САМОМ ДЕЛЕ, а не что записано
+# в настройках: службу могли остановить руками, и врать об этом нельзя.
+_bot_active_variant() {
+    if alertbot_installed && alertbot_service_active; then
+        echo "alert"
+    elif tgbot_installed && tgbot_service_active; then
+        echo "admin"
+    else
+        echo "none"
+    fi
+}
+
+_bot_variant_name() {
+    case "$1" in
+        admin) echo "бот-администратор" ;;
+        alert) echo "бот-сторож" ;;
+        *)     echo "никто" ;;
+    esac
+}
+
 # Строка состояния для главного меню: называет вариант, а не просто «бот».
 bot_status_line() {
-    if alertbot_installed && [ "${TGBOT_VARIANT:-none}" = "alert" ]; then
-        echo "сторож: $(alertbot_status_line)"
+    local _active
+    _active=$(_bot_active_variant)
+    case "$_active" in
+        admin) echo "администратор: работает" ;;
+        alert) echo "сторож: работает" ;;
+    esac
+    [ "$_active" = "none" ] || return 0
+
+    if tgbot_installed && alertbot_installed; then
+        echo "оба установлены, остановлены"
     elif tgbot_installed; then
         echo "администратор: $(tgbot_status_line)"
     elif alertbot_installed; then

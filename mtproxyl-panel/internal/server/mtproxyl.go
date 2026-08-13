@@ -1327,6 +1327,30 @@ func (s *Server) registerMtproxylRoutes(mux *http.ServeMux, jwtSecret []byte) {
 		writeJSON(w, http.StatusOK, jsonResponse{OK: true, Data: map[string]string{"output": out}})
 	}))
 
+	// Активация — отдельная ручка, а не настройка: она трогает обе службы, и
+	// путать её с правкой порога не стоит.
+	mux.Handle("POST /api/alertbot/activate", protected(func(w http.ResponseWriter, r *http.Request) {
+		if !guard(w) || busy(w) {
+			return
+		}
+		if _, err := client.AlertbotActivate(r.Context()); err != nil {
+			writeCLIError(w, "mtproxyl_error", err)
+			return
+		}
+		alertbotStatus(w, r)
+	}))
+
+	mux.Handle("POST /api/tgbot/activate", protected(func(w http.ResponseWriter, r *http.Request) {
+		if !guard(w) || busy(w) {
+			return
+		}
+		if _, err := client.TgbotActivate(r.Context()); err != nil {
+			writeCLIError(w, "mtproxyl_error", err)
+			return
+		}
+		tgbotStatus(w, r)
+	}))
+
 	mux.Handle("PUT /api/alertbot/settings", protected(func(w http.ResponseWriter, r *http.Request) {
 		if !guard(w) || busy(w) {
 			return
