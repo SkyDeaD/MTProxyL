@@ -217,9 +217,16 @@ install -m 0755 "$FOUND" "$BIN"
 if [ -f "$0" ] && [ "$0" != "${DIR}/install-alertbot.sh" ]; then
     install -m 0755 "$0" "${DIR}/install-alertbot.sh" 2>/dev/null || true
 elif [ ! -f "${DIR}/install-alertbot.sh" ]; then
-    # Скрипт пришёл по трубе, файла нет — скачиваем копию.
-    curl -fsSL "https://raw.githubusercontent.com/${REPO}/${INSTALLER_BRANCH}/install-alertbot.sh" \
-        -o "${DIR}/install-alertbot.sh" 2>/dev/null && chmod 0755 "${DIR}/install-alertbot.sh" || true
+    # Скрипт пришёл по трубе — файла, который можно скопировать, нет вовсе.
+    # Тогда скачиваем копию, и о неудаче говорим вслух: без этого файла
+    # кнопки установки и обновления в панели упрутся в «No such file».
+    if curl -fsSL "https://raw.githubusercontent.com/${REPO}/${INSTALLER_BRANCH}/install-alertbot.sh" \
+            -o "${DIR}/install-alertbot.sh" 2>/dev/null; then
+        chmod 0755 "${DIR}/install-alertbot.sh"
+    else
+        rm -f "${DIR}/install-alertbot.sh"
+        warn "копию установщика скачать не удалось — управлять ботом из панели не выйдет"
+    fi
 fi
 
 # Права урезаны до трёх подкоманд чтения: сторож не запускает прокси и не
