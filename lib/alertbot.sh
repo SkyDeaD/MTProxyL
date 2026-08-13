@@ -336,7 +336,11 @@ alertbot_install() {
     # том, кто чем управляет. Поэтому вариант ровно один.
     alertbot_take_over
 
-    systemctl enable --now "$ALERTBOT_SERVICE" >/dev/null 2>&1
+    # enable и restart порознь: «--now» на уже активной службе делает start,
+    # а он для неё пустышка — подменённый бинарник так и остался бы на диске,
+    # пока в памяти крутится прежний процесс.
+    systemctl enable "$ALERTBOT_SERVICE" >/dev/null 2>&1
+    systemctl restart "$ALERTBOT_SERVICE" >/dev/null 2>&1
     sleep 1
     if alertbot_service_active; then
         log_success "Алерт-бот установлен и работает"
