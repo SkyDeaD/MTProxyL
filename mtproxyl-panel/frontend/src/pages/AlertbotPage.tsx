@@ -47,7 +47,10 @@ export function AlertbotPanel({ onChanged }: { onChanged?: () => void | Promise<
     }
   }, []);
 
-  const { operation, dismiss } = useMtproxylOperation(load, ['alertbot:']);
+  // start обязателен: без него хук не начинает опрашивать операцию, и страница
+  // выглядит так, будто нажатие ничего не сделало, — а ошибка всплывает только
+  // после перезагрузки.
+  const { operation, start, dismiss, running: installing } = useMtproxylOperation(load, ['alertbot:']);
 
   useEffect(() => {
     void load();
@@ -225,10 +228,10 @@ export function AlertbotPanel({ onChanged }: { onChanged?: () => void | Promise<
             </div>
           </div>
           <Button
-            disabled={busy || !canInstall}
+            disabled={busy || installing || !canInstall}
             onClick={() =>
               void act(async () => {
-                await alertbotApi.install(token.trim(), Number(chat.trim() || 0));
+                start(await alertbotApi.install(token.trim(), Number(chat.trim() || 0)));
                 setToken('');
               })
             }

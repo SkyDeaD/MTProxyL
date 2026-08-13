@@ -585,10 +585,20 @@ $SYSTEM_USER ALL=(root) NOPASSWD: $_script tgbot admin-add [0-9]*
 $SYSTEM_USER ALL=(root) NOPASSWD: $_script tgbot admin-rm [0-9]*
 $SYSTEM_USER ALL=(root) NOPASSWD: $_script tgbot set [a-z]*.[a-z_]* *
 
-# Бот-сторож. Он живёт своей службой и подкоманд MTProxyL не имеет — панель
-# разговаривает с ним напрямую. Права поимённые: запуск службы, чтение
-# журнала, настройки его же бинарником и установка тем самым скриптом,
-# которым его ставят из терминала.
+# Бот-сторож. Установку и удаление панель просит у MTProxyL — так же, как для
+# бота-администратора: подкоманда работает и тогда, когда бота ещё нет вовсе,
+# а установщик на диске появляется только вместе с ним.
+$SYSTEM_USER ALL=(root) NOPASSWD: $_script alertbot install
+$SYSTEM_USER ALL=(root) NOPASSWD: $_script alertbot install --token [0-9]* --chat *
+$SYSTEM_USER ALL=(root) NOPASSWD: $_script alertbot install --chat *
+$SYSTEM_USER ALL=(root) NOPASSWD: $_script alertbot update
+$SYSTEM_USER ALL=(root) NOPASSWD: $_script alertbot uninstall --yes
+$SYSTEM_USER ALL=(root) NOPASSWD: $_script alertbot status --json
+$SYSTEM_USER ALL=(root) NOPASSWD: $_script alertbot set [a-z_]* *
+$SYSTEM_USER ALL=(root) NOPASSWD: $_script alertbot use
+
+# Остальное панель делает напрямую: служба, журнал и настройки его же
+# бинарником. Права поимённые.
 $SYSTEM_USER ALL=(root) NOPASSWD: /bin/systemctl start mtproxyl-alertbot.service
 $SYSTEM_USER ALL=(root) NOPASSWD: /bin/systemctl stop mtproxyl-alertbot.service
 $SYSTEM_USER ALL=(root) NOPASSWD: /bin/systemctl restart mtproxyl-alertbot.service

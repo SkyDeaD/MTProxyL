@@ -119,39 +119,49 @@ func (c *Client) AlertbotLogs(ctx context.Context, lines int) (string, error) {
 // AlertbotInstall ставит или переустанавливает сторожа тем же скриптом, что и
 // установка из терминала: два разных пути установки разошлись бы в первый же
 // месяц.
+// AlertbotInstall ставит сторожа. Порядок попыток важен: подкоманда MTProxyL
+// работает и тогда, когда бота ещё нет вовсе, а установщик на диске
+// появляется только вместе с самим ботом — то есть требовать его значило бы
+// «чтобы поставить бота, сначала поставьте бота».
 func (c *Client) AlertbotInstall(ctx context.Context, token string, chat int64) (string, error) {
-	if err := c.ensureInstaller(ctx); err != nil {
-		return "", err
-	}
-	args := []string{alertbotInstaller}
-	// Пустой токен — это «переустановить с прежним». Передавать его пустой
-	// строкой нельзя: правило sudo ждёт там цифры, откажет, и панель соврёт
-	// про нехватку прав вместо того, чтобы сделать дело.
+	cliArgs := []string{"alertbot", "install"}
+	// Пустой токен — «переустановить с прежним». Передавать пустую строку
+	// нельзя: правило sudo ждёт там цифры, откажет, и панель соврёт про
+	// нехватку прав вместо того, чтобы сделать дело.
 	if token != "" {
-		args = append(args, "--token", token)
+		cliArgs = append(cliArgs, "--token", token)
 	}
 	if chat != 0 {
-		args = append(args, "--chat", strconv.FormatInt(chat, 10))
+		cliArgs = append(cliArgs, "--chat", strconv.FormatInt(chat, 10))
 	}
-	return c.sudo(ctx, alertbotTimeout, "sh", args...)
+
+	out, err := c.run(ctx, cliArgs...)
+	if err == nil {
+		return out, nil
+	}
+	if !unsupportedCommand(out, err) {
+		return out, err
+	}
+
+	// MTProxyL официальный, про сторожа не знает — остаётся установщик рядом
+	// с ботом, если он там есть.
+	if _, statErr := c.sudo(ctx, 20*time.Second, "test", "-f", alertbotInstaller); statErr != nil {
+		return "", errNoInstaller()
+	}
+	shArgs := []string{alertbotInstaller}
+	if token != "" {
+		shArgs = append(shArgs, "--token", token)
+	}
+	if chat != 0 {
+		shArgs = append(shArgs, "--chat", strconv.FormatInt(chat, 10))
+	}
+	return c.sudo(ctx, alertbotTimeout, "sh", shArgs...)
 }
 
-// ensureInstaller проверяет, что скрипт установки на месте.
-//
-// Своего способа поставить бота у панели нет — она нажимает тот же скрипт,
-// которым его ставят из терминала. Если его нет (бота ставили старой версией
-// или сносили вместе с каталогом), человеку надо сказать это словами: сырое
-// «sh: 0: cannot open …» не объясняет ничего и не подсказывает, что делать.
-func (c *Client) ensureInstaller(ctx context.Context) error {
-	if _, err := c.sudo(ctx, 20*time.Second, "test", "-f", alertbotInstaller); err == nil {
-		return nil
-	}
-	// На форке есть подкоманда, которая умеет всё сама, — она же и положит
-	// установщик рядом с ботом.
-	if _, err := c.run(ctx, "alertbot", "install"); err == nil {
-		return nil
-	}
-	return fmt.Errorf("установщик бота-сторожа не найден (%s). Поставьте его командой:\n"+
+func errNoInstaller() error {
+	return fmt.Errorf("поставить бота-сторожа отсюда нечем: MTProxyL не знает подкоманду "+
+		"alertbot, а установщика (%s) на сервере нет.\n"+
+		"Поставьте форк целиком либо выполните:\n"+
 		"curl -fsSL https://raw.githubusercontent.com/SkyDeaD/MTProxyL/tg-testing/install-alertbot.sh | sudo sh",
 		alertbotInstaller)
 }
@@ -161,10 +171,14 @@ func (c *Client) AlertbotService(ctx context.Context, action string) (string, er
 	case "start", "stop", "restart":
 		return c.sudo(ctx, time.Minute, "systemctl", action, alertbotService)
 	case "update":
-		// Обновление — та же установка: скрипт перекачает бинарник, а конфиг
-		// с id живого сообщения не тронет.
-		if err := c.ensureInstaller(ctx); err != nil {
-			return "", err
+		// Обновление — та же установка: бинарник перекачивается, а конфиг с id
+		// живого сообщения не трогается.
+		out, err := c.run(ctx, "alertbot", "update")
+		if err == nil || !unsupportedCommand(out, err) {
+			return out, err
+		}
+		if _, statErr := c.sudo(ctx, 20*time.Second, "test", "-f", alertbotInstaller); statErr != nil {
+			return "", errNoInstaller()
 		}
 		return c.sudo(ctx, alertbotTimeout, "sh", alertbotInstaller)
 	default:
@@ -208,10 +222,12 @@ func (c *Client) TgbotActivate(ctx context.Context) (string, error) {
 }
 
 func (c *Client) AlertbotUninstall(ctx context.Context) (string, error) {
-	if _, err := c.sudo(ctx, 20*time.Second, "test", "-f", alertbotInstaller); err != nil {
-		// Установщика нет — сносим подкомандой форка. Оставлять человека с
-		// неудаляемым ботом хуже, чем ходить окольным путём.
-		return c.run(ctx, "alertbot", "uninstall", "--yes")
+	out, err := c.run(ctx, "alertbot", "uninstall", "--yes")
+	if err == nil || !unsupportedCommand(out, err) {
+		return out, err
+	}
+	if _, statErr := c.sudo(ctx, 20*time.Second, "test", "-f", alertbotInstaller); statErr != nil {
+		return "", errNoInstaller()
 	}
 	return c.sudo(ctx, time.Minute, "sh", alertbotInstaller, "--uninstall")
 }

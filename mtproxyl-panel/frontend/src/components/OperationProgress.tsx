@@ -24,6 +24,9 @@ const OPERATION_LABELS: Record<string, string> = {
   'nft:preset:classic': 'Переключение лимитера в classic',
   'nft:preset:smart': 'Переключение лимитера в smart',
   'tgbot:install': 'Установка телеграм-бота',
+  'alertbot:install': 'Установка бота-сторожа',
+  'alertbot:service': 'Обновление бота-сторожа',
+  'alertbot:uninstall': 'Удаление бота-сторожа',
 };
 
 function label(name?: string): string {
