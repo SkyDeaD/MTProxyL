@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useBranding } from '@/hooks/useBranding';
 import { Outlet, Navigate } from 'react-router-dom';
 import { Sidebar, BottomNav } from './Sidebar';
 import { useAuth } from '@/hooks/useAuth';
@@ -6,6 +7,8 @@ import { useMtproxyl } from '@/hooks/useMtproxyl';
 import { Menu, AlertTriangle } from 'lucide-react';
 
 export function AppLayout() {
+  const { name } = useBranding();
+
   const { username, loading } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   // Показываем на всех страницах, а не только на дашборде: несоответствие
@@ -37,9 +40,7 @@ export function AppLayout() {
           >
             <Menu size={20} />
           </button>
-          <h1 className="text-sm font-semibold text-text-primary">
-            MTProxyL-Panel
-          </h1>
+          <h1 className="text-sm font-semibold text-text-primary truncate">{name}</h1>
         </div>
 
         {apiMismatch && (

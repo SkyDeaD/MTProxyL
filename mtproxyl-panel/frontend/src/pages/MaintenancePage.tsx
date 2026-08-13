@@ -4,7 +4,9 @@ import { Button } from '@/components/ui/button';
 import { ErrorAlert } from '@/components/ErrorAlert';
 import { ParamField } from '@/components/ParamField';
 import { useManagerOnly } from '@/hooks/useMtproxyl';
-import { mtproxylSettingsApi, type MtproxylSetting } from '@/lib/api';
+import { Input } from '@/components/ui/input';
+import { useBranding } from '@/hooks/useBranding';
+import { brandingApi, mtproxylSettingsApi, type MtproxylSetting } from '@/lib/api';
 
 /**
  * Настройки самого MTProxyL: в конфиг движка не попадают, поэтому им не место
@@ -90,6 +92,8 @@ export function MaintenancePage() {
         </p>
       </div>
 
+      <PanelNameCard />
+
       {error && <ErrorAlert message={error} onRetry={load} />}
       {notice && <div className="text-sm text-success">{notice}</div>}
 
@@ -140,5 +144,63 @@ export function MaintenancePage() {
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Имя панели в шапке и во вкладке браузера.
+ *
+ * Нужно тем, у кого панелей несколько: вкладки выглядят одинаково, и нужную
+ * приходится искать перебором.
+ */
+function PanelNameCard() {
+  const { name, apply } = useBranding();
+  const [value, setValue] = useState(name);
+  const [saving, setSaving] = useState(false);
+  const [failed, setFailed] = useState<string | null>(null);
+
+  useEffect(() => setValue(name), [name]);
+
+  const save = async () => {
+    setSaving(true);
+    setFailed(null);
+    try {
+      const res = await brandingApi.save(value.trim());
+      apply(res.name);
+    } catch (e) {
+      setFailed(e instanceof Error ? e.message : 'Не удалось сохранить');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Имя панели</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Input
+            value={value}
+            maxLength={40}
+            placeholder="MTProxyL-Panel"
+            onChange={(e) => setValue(e.target.value)}
+          />
+          <Button
+            variant="outline"
+            disabled={saving || value.trim() === name}
+            onClick={() => void save()}
+          >
+            {saving ? 'Сохраняем…' : 'Сохранить'}
+          </Button>
+        </div>
+        <p className="text-xs text-text-secondary">
+          Показывается в шапке и во вкладке браузера. Пусто — обычное «MTProxyL-Panel».
+          Пригодится, когда панелей несколько: по одинаковым вкладкам их не различить.
+        </p>
+        {failed && <p className="text-xs text-danger">{failed}</p>}
+      </CardContent>
+    </Card>
   );
 }

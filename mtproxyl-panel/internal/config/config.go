@@ -152,6 +152,10 @@ func (t TelemtConfig) EffectiveConfigEditMode() string {
 }
 
 type PanelConfig struct {
+	// DisplayName — как панель называет себя в интерфейсе и во вкладке
+	// браузера. Пусто — обычное «MTProxyL-Panel». Нужен тем, у кого панелей
+	// несколько: по одинаковым вкладкам их не различить.
+	DisplayName      string           `toml:"display_name"`
 	BinaryPath       string           `toml:"binary_path"`
 	ServiceName      string           `toml:"service_name"`
 	GithubRepo       string           `toml:"github_repo"`

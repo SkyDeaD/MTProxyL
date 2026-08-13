@@ -52,6 +52,10 @@ config_edit_mode = "api"
 # auto_apply = true       # automatically install stable updates
 
 [panel]
+# Имя панели в шапке и во вкладке браузера. Пусто — «MTProxyL-Panel».
+# Пригодится, когда панелей несколько: по одинаковым вкладкам их не различить.
+# Меняется и из интерфейса: «Обслуживание» → «Имя панели».
+# display_name = "Прокси в Ташкенте"
 # Path to mtproxyl-panel binary (default: /usr/local/bin/mtproxyl-panel)
 # binary_path = "/usr/local/bin/mtproxyl-panel"
 # Systemd service name (default: mtproxyl-panel)

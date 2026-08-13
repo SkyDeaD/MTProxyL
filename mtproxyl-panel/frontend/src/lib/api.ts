@@ -55,6 +55,17 @@ export const panelApi = {
     request<T>(PANEL_BASE, path, { method: 'PUT', body: body ? JSON.stringify(body) : undefined }),
 };
 
+// Имя панели — в шапке и во вкладке. Чтение без авторизации: страница входа
+// такая же вкладка, и различать панели надо ещё до логина.
+export const brandingApi = {
+  get: () => request<{ name: string }>(PANEL_BASE, '/branding'),
+  save: (name: string) =>
+    request<{ name: string }>(PANEL_BASE, '/branding', {
+      method: 'PUT',
+      body: JSON.stringify({ name }),
+    }),
+};
+
 export const authApi = {
   login: (username: string, password: string) =>
     request<{ username: string }>(AUTH_BASE, '/login', {

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"golang.org/x/crypto/acme/autocert"
 
@@ -94,10 +95,26 @@ func (rl *loginRateLimiter) record(ip string) {
 
 type Server struct {
 	cfg *config.Config
+
+	// mu защищает поля конфигурации, которые панель меняет на ходу. Пока это
+	// одно имя, но читают его из каждого запроса, а пишут из обработчика —
+	// без замка это гонка.
+	mu sync.RWMutex
 }
 
 func New(cfg *config.Config) *Server {
 	return &Server{cfg: cfg}
+}
+
+// displayName — как панель себя называет. Пустая настройка означает обычное
+// имя: так у большинства, и заставлять их что-то вписывать незачем.
+func (s *Server) displayName() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if name := strings.TrimSpace(s.cfg.Panel.DisplayName); name != "" {
+		return name
+	}
+	return "MTProxyL-Panel"
 }
 
 type jsonResponse struct {
@@ -384,6 +401,52 @@ func (s *Server) Run(version string, distFS fs.FS) error {
 	mux.Handle("GET /api/auto-update/status", auth.RequireAuth(jwtSecret, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, jsonResponse{OK: true, Data: autoMgr.GetStatus()})
 	})))
+	// Имя панели. Читается без авторизации: его показывает и страница входа, а
+	// одинаковые вкладки у человека с двумя панелями — ровно та беда, ради
+	// которой всё это заведено. Ничего чувствительного в имени нет.
+	mux.HandleFunc("GET /api/branding", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, jsonResponse{OK: true, Data: map[string]string{
+			"name": s.displayName(),
+		}})
+	})
+
+	mux.Handle("PUT /api/branding", auth.RequireAuth(jwtSecret, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Name string `json:"name"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10)).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", "Некорректное тело запроса")
+			return
+		}
+		name := strings.TrimSpace(req.Name)
+		// Имя рисуется в шапке и во вкладке, поэтому длину ограничиваем: иначе
+		// оно вытеснит собой меню.
+		if utf8.RuneCountInString(name) > 40 {
+			writeError(w, http.StatusBadRequest, "invalid_name", "Имя длиннее 40 символов не поместится в шапку")
+			return
+		}
+		if strings.ContainsAny(name, "\n\r\t") {
+			writeError(w, http.StatusBadRequest, "invalid_name", "Имя должно быть одной строкой")
+			return
+		}
+
+		s.mu.Lock()
+		s.cfg.Panel.DisplayName = name
+		s.mu.Unlock()
+
+		if s.cfg.Path != "" {
+			if _, err := telemt_config.QuickUpdate(s.cfg.Path, map[string]interface{}{
+				"panel.display_name": name,
+			}); err != nil {
+				log.Printf("WARNING: не удалось сохранить имя панели: %s", err)
+				writeError(w, http.StatusInternalServerError, "save_failed",
+					"Имя применено, но сохранить в конфиг не вышло — после перезапуска вернётся прежнее")
+				return
+			}
+		}
+		writeJSON(w, http.StatusOK, jsonResponse{OK: true, Data: map[string]string{"name": s.displayName()}})
+	})))
+
 	mux.Handle("PUT /api/auto-update/config", auth.RequireAuth(jwtSecret, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req auto_update.UpdateConfigRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

@@ -1,4 +1,5 @@
 import { NavLink } from 'react-router-dom';
+import { useBranding } from '@/hooks/useBranding';
 import { LayoutDashboard, Users, Activity, Shield, Network, Settings, ArrowUpCircle, ScrollText, LogOut, X, Sun, Moon, ToggleLeft, Globe, Archive, ShieldAlert, MapPin, Route, SlidersHorizontal, Gauge, FileCode, Puzzle, Radar, Wrench, Bot } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
@@ -41,6 +42,8 @@ interface SidebarProps {
 }
 
 export function Sidebar({ isOpen = true, onClose }: SidebarProps) {
+  const { name } = useBranding();
+
   const { logout, username } = useAuth();
   const { theme, toggle: toggleTheme } = useTheme();
   const { enabled: mtproxylEnabled, mode: mtproxylMode } = useMtproxyl();
@@ -62,8 +65,8 @@ export function Sidebar({ isOpen = true, onClose }: SidebarProps) {
         isOpen ? "translate-x-0" : "-translate-x-full"
       )}>
         <div className="p-4 border-b border-border flex items-center justify-between">
-          <h1 className="text-lg font-bold text-text-primary tracking-tight">
-            MTProxyL-Panel
+          <h1 className="text-lg font-bold text-text-primary tracking-tight truncate" title={name}>
+            {name}
           </h1>
           <button
             onClick={onClose}
