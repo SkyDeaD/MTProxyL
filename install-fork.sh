@@ -95,14 +95,20 @@ if [ -x "${INSTALL_DIR}/mtproxyl.sh" ]; then
     ok "MTProxyL обновлён до форка"
 else
     say "MTProxyL не найден — ставлю с нуля из форка"
+    # Установщик MTProxyL написан на bash и пользуется его синтаксисом. Запуск
+    # через sh на Debian и Ubuntu отдаёт его dash, где «command -v curl
+    # &>/dev/null» читается как «запустить в фоне», — и установка заявляет, что
+    # curl не найден, печатая рядом путь к нему же.
+    command -v bash >/dev/null 2>&1 || die "нужен bash: установщик MTProxyL написан на нём (apt install bash)"
+
     _inst=$(mktemp)
     curl -fsSL "${RAW}/install.sh" -o "$_inst" || die "не удалось скачать install.sh"
     # Установка с нуля идёт мастером и спрашивает про порт, домен и прочее,
     # поэтому запускаем её с терминалом, а не из трубы.
     if [ -r /dev/tty ]; then
-        sh "$_inst" --repo "$REPO" --branch "$BRANCH" < /dev/tty
+        bash "$_inst" --repo "$REPO" --branch "$BRANCH" < /dev/tty
     else
-        sh "$_inst" --repo "$REPO" --branch "$BRANCH"
+        bash "$_inst" --repo "$REPO" --branch "$BRANCH"
     fi
     rm -f "$_inst"
     exit 0
