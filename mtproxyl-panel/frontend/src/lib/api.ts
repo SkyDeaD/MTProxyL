@@ -651,67 +651,123 @@ export const availabilityApi = {
     }),
 };
 
-/**
- * Телеграм-бот, зеркалящий вердикт доступности в личку админа. Токен обратно
- * не приходит — только признак, что он задан.
- */
-export interface TelegramBotStatus {
-  /** false — выключена сама проверка доступности, боту нечего сообщать. */
-  available: boolean;
-  enabled: boolean;
+// ── Телеграм-бот ─────────────────────────────────────────────────────────────
+
+export interface TgbotConfig {
+  admins: number[];
+  notify: Record<string, boolean>;
+  intervals: Record<string, number>;
+  autobackup: { enabled: boolean; time: string; send_file: boolean };
   has_token: boolean;
-  admin_id: number;
-  alert_threshold: number;
-  /** Порог доли неудачных подключений к дата-центрам Telegram, %. */
-  connect_fail_threshold: number;
-  /** Часовой пояс для времени в сообщениях; пусто — определять самому. */
-  timezone: string;
-  /** Последний вердикт наблюдения за исходящей связью; нет — наблюдение молчит. */
-  uplink?: TelegramUplinkStatus | null;
-  running?: boolean;
-  bot_username?: string;
-  last_error?: string;
-  status_message_id?: number;
 }
 
-/**
- * Состояние исходящей связи прокси с дата-центрами Telegram. Отвечает на
- * вопрос, которого не видит проверка зондами: снаружи прокси может быть
- * здоров, а писать в Telegram не может.
- */
-export interface TelegramUplinkStatus {
-  CheckedAt: string;
-  EngineUp: boolean;
-  EngineReadOnly: boolean;
-  EngineError: string;
-  Applicable: boolean;
-  NotApplicableReason: string;
-  AliveWriters: number;
-  RequiredWriters: number;
-  Level: 'green' | 'yellow' | 'red';
-  Problems: string[] | null;
+export interface TgbotStatus {
+  installed: boolean;
+  configured: boolean;
+  /** Служба запущена сейчас. */
+  active: boolean;
+  /** Включён автозапуск при загрузке сервера. */
+  enabled: boolean;
+  dir: string;
+  service: string;
+  config: TgbotConfig;
 }
 
-/** Присылаем только изменённые поля: остальные остаются как были. */
-export interface TelegramBotPatch {
-  enabled?: boolean;
-  token?: string;
-  admin_id?: number;
-  alert_threshold?: number;
-  connect_fail_threshold?: number;
-  timezone?: string;
+export interface TgbotStatusResponse {
+  /** false — установленный MTProxyL старше бота. */
+  supported: boolean;
+  message?: string;
+  status?: TgbotStatus;
+  /** Подсказка про @BotFather — приходит с сервера, чтобы не расходилась с CLI. */
+  hint?: string;
+  operation?: MtproxylOperation;
 }
 
-const TELEGRAM_BASE = `${BASE}/api/telegram`;
+const TGBOT_BASE = `${BASE}/api/tgbot`;
 
-export const telegramApi = {
-  status: () => request<TelegramBotStatus>(TELEGRAM_BASE, '/status'),
-  save: (patch: TelegramBotPatch) =>
-    request<TelegramBotStatus>(TELEGRAM_BASE, '/config', {
-      method: 'PUT',
-      body: JSON.stringify(patch),
+export const tgbotApi = {
+  status: () => request<TgbotStatusResponse>(TGBOT_BASE, '/status'),
+  logs: (lines = 100) =>
+    request<{ lines: string }>(TGBOT_BASE, `/logs?lines=${lines}`),
+  /** Пустой токен — переустановка поверх настроенного бота, без смены токена. */
+  install: (token: string, admin: number) =>
+    request<MtproxylOperation>(TGBOT_BASE, '/install', {
+      method: 'POST',
+      body: JSON.stringify({ token, admin }),
     }),
-  /** Проверить токен и отправить админу пробное сообщение. */
-  test: () =>
-    request<{ bot_username: string; sent: boolean }>(TELEGRAM_BASE, '/test', { method: 'POST' }),
+  service: (action: 'start' | 'stop' | 'restart' | 'update') =>
+    request<{ output: string }>(TGBOT_BASE, '/service', {
+      method: 'POST',
+      body: JSON.stringify({ action }),
+    }),
+  uninstall: () =>
+    request<{ output: string }>(TGBOT_BASE, '/uninstall', { method: 'POST' }),
+  admin: (id: number, remove = false) =>
+    request<TgbotStatusResponse>(TGBOT_BASE, '/admins', {
+      method: 'POST',
+      body: JSON.stringify({ id, remove }),
+    }),
+  set: (key: string, value: string) =>
+    request<TgbotStatusResponse>(TGBOT_BASE, '/settings', {
+      method: 'PUT',
+      body: JSON.stringify({ key, value }),
+    }),
+};
+
+// ── Бот-сторож ──────────────────────────────────────────────────────────────
+// Второй вариант бота. Ставится и настраивается тем же способом, что и
+// бот-администратор, поэтому и клиент здесь такой же формы.
+
+export interface AlertbotConfig {
+  /** Личка, группа или канал — у групп и каналов id отрицательный. */
+  chat_id: number;
+  alert_threshold: number;
+  connect_fail_threshold: number;
+  /** Пусто — зона определяется на сервере сама. */
+  timezone: string;
+  has_token: boolean;
+}
+
+export interface AlertbotStatus {
+  installed: boolean;
+  configured: boolean;
+  active: boolean;
+  enabled: boolean;
+  dir: string;
+  service: string;
+  config: AlertbotConfig;
+}
+
+export interface AlertbotStatusResponse {
+  supported: boolean;
+  message?: string;
+  status?: AlertbotStatus;
+  hint?: string;
+  operation?: MtproxylOperation;
+}
+
+const ALERTBOT_BASE = `${BASE}/api/alertbot`;
+
+export const alertbotApi = {
+  status: () => request<AlertbotStatusResponse>(ALERTBOT_BASE, '/status'),
+  logs: (lines = 100) =>
+    request<{ lines: string }>(ALERTBOT_BASE, `/logs?lines=${lines}`),
+  /** Пустой токен — переустановка поверх настроенного, без смены токена. */
+  install: (token: string, chat: number) =>
+    request<MtproxylOperation>(ALERTBOT_BASE, '/install', {
+      method: 'POST',
+      body: JSON.stringify({ token, chat }),
+    }),
+  service: (action: 'start' | 'stop' | 'restart' | 'update') =>
+    request<{ output: string }>(ALERTBOT_BASE, '/service', {
+      method: 'POST',
+      body: JSON.stringify({ action }),
+    }),
+  uninstall: () =>
+    request<{ output: string }>(ALERTBOT_BASE, '/uninstall', { method: 'POST' }),
+  set: (key: string, value: string) =>
+    request<AlertbotStatusResponse>(ALERTBOT_BASE, '/settings', {
+      method: 'PUT',
+      body: JSON.stringify({ key, value }),
+    }),
 };

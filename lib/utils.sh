@@ -571,6 +571,17 @@ self_update() {
         echo ""
     fi
 
+    # Код бота живёт в том же репозитории и обновляется вместе со скриптом:
+    # иначе бот однажды позовёт подкоманду, которой в его правах ещё нет.
+    if tgbot_installed 2>/dev/null; then
+        log_info "Обновляем телеграм-бота..."
+        if tgbot_update_sources; then
+            log_success "Телеграм-бот обновлён и перезапущен"
+        else
+            log_warn "Код бота обновить не удалось — повторите: mtproxyl tgbot update"
+        fi
+    fi
+
     log_success "MTProxyL обновлён: v${VERSION} → v${_new_ver}"
     if [ "$_restart" = "false" ]; then
         return 0
@@ -775,10 +786,12 @@ show_cli_help() {
     echo -e "  ${BOLD}NFT:${NC}            nft apply|remove|service|drop|preset|smart|zapret2|zapret2-stop|zapret2-rm|zapret2-wscale"
     echo -e "  ${BOLD}Selfmask:${NC}       selfmask status|setup|apply|set|settable|verify|disable|menu"
     echo -e "  ${BOLD}Веб-панель:${NC}     panel status|install|restart|password|uninstall"
+    echo -e "  ${BOLD}Телеграм-бот:${NC}   tgbot status|install|setup|start|stop|restart|logs|uninstall"
     echo -e "  ${BOLD}PQ проверка:${NC}    pq-check [домен[:порт]]"
     echo -e "  ${BOLD}Безопасность:${NC}   geoblock add|remove|list | upstream list|add|remove | sni-policy"
     echo -e "  ${BOLD}Мониторинг:${NC}     traffic | connections | metrics [live] | logs | health | info"
     echo -e "  ${BOLD}История IP:${NC}     ip-history status|flush|on|off"
+    echo -e "  ${BOLD}Доступность:${NC}    availability status|check|details|target|on|off|token"
     echo -e "  ${BOLD}Бэкапы:${NC}         backup [--encrypt] | restore <файл>"
     echo -e "  ${BOLD}Reanimator:${NC}     mode [manager|reanimator] | detect | edit-config\n                  install-telemt | uninstall-telemt"
     echo -e "  ${BOLD}Система:${NC}        install | menu | update [--no-restart] | update-check | uninstall\n                  version | help"

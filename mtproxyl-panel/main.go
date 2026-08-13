@@ -8,13 +8,6 @@ import (
 	"os"
 	"strings"
 
-	// Встроенная база часовых поясов. Без неё time.LoadLocation зависит от
-	// файлов на диске, а их может не быть вовсе: в образе панели стоит только
-	// ca-certificates, tzdata там нет. Тогда любая зона молча превращалась в
-	// UTC, и бот писал время не то, что показывает timedatectl на сервере.
-	// Плата — около 450 КБ к бинарнику.
-	_ "time/tzdata"
-
 	"golang.org/x/term"
 
 	"github.com/Liafanx/mtproxyl-panel/internal/auth"
@@ -22,7 +15,7 @@ import (
 	"github.com/Liafanx/mtproxyl-panel/internal/server"
 )
 
-var version = "1.0.6"
+var version = "1.0.7"
 
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "version" {

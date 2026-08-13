@@ -60,14 +60,43 @@ jobs:
       # именем, а не каталог. Бинарник статический (CGO отключён), поэтому одна
       # сборка годится и для glibc, и для musl — раскладываем её под оба имени,
       # чтобы обе ветки выбора нашли своё.
+      # Бот-сторож — второй бинарник в том же релизе: он ставится отдельной
+      # службой и работает без панели, но выпускается вместе с ней, чтобы
+      # версии не разъезжались.
+      - name: Build alert bot
+        working-directory: mtproxyl-alertbot
+        run: |
+          go vet ./...
+          go test ./...
+          for arch in amd64 arm64; do
+            case "$arch" in
+              amd64) out=x86_64 ;;
+              arm64) out=aarch64 ;;
+            esac
+            CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build \
+              -trimpath -ldflags "-s -w -X main.version=${{ steps.version.outputs.value }}" \
+              -o "../mtproxyl-panel/release/mtproxyl-alertbot-${out}-linux" .
+          done
+
       - name: Package archives
         run: |
           cd release
           for arch in x86_64 aarch64; do
-            bin="mtproxyl-panel-${arch}-linux"
-            [ -f "$bin" ] || { echo "missing $bin"; exit 1; }
-            for libc in gnu musl; do
-              tar czf "mtproxyl-panel-${arch}-linux-${libc}.tar.gz" "$bin"
+            for name in mtproxyl-panel mtproxyl-alertbot; do
+              bin="${name}-${arch}-linux"
+              [ -f "$bin" ] || { echo "missing $bin"; exit 1; }
+              for libc in gnu musl; do
+                # Установщик сторожа ищет внутри архива файл без суффикса
+                # архитектуры — так проще и ему, и человеку с распакованным
+                # архивом в руках.
+                if [ "$name" = "mtproxyl-alertbot" ]; then
+                  cp "$bin" mtproxyl-alertbot
+                  tar czf "${name}-${arch}-linux-${libc}.tar.gz" mtproxyl-alertbot
+                  rm -f mtproxyl-alertbot
+                else
+                  tar czf "${name}-${arch}-linux-${libc}.tar.gz" "$bin"
+                fi
+              done
             done
           done
           # Два разных потребителя — два формата. install.sh (первая установка)
