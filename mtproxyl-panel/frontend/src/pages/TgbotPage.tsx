@@ -45,6 +45,10 @@ export function TgbotPage() {
   // Статус сторожа нужен и здесь: выбор активного бота показывает обоих
   // сразу, поэтому страница знает про обе службы.
   const [alert, setAlert] = useState<AlertbotStatus | null>(null);
+  // Счётчик, которым страница просит карточку сторожа перечитать себя:
+  // переключение активного бота меняет обе службы, а свой статус та карточка
+  // держит сама.
+  const [botsChanged, setBotsChanged] = useState(0);
 
   const [token, setToken] = useState('');
   const [admin, setAdmin] = useState('');
@@ -125,7 +129,14 @@ export function TgbotPage() {
       <PageTitle />
       {/* Сначала — кто работает: с этим вопросом сюда и приходят. Ниже
           карточки обоих ботов подряд, чтобы не искать второго по вкладкам. */}
-      <ActiveBotCard admin={status} alert={alert} onChanged={load} />
+      <ActiveBotCard
+        admin={status}
+        alert={alert}
+        onChanged={async () => {
+          await load();
+          setBotsChanged((n) => n + 1);
+        }}
+      />
       {error && <ErrorAlert message={error} onRetry={() => void load()} />}
 
       <div className="flex items-center gap-2 pt-2">
@@ -387,7 +398,7 @@ export function TgbotPage() {
         Не управляет прокси: держит в чате одно живое сообщение и будит звуком, когда прокси
         перестал работать — снаружи или изнутри.
       </p>
-      <AlertbotPanel onChanged={load} />
+      <AlertbotPanel onChanged={load} reloadSignal={botsChanged} />
     </div>
   );
 }

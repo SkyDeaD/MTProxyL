@@ -21,7 +21,15 @@ import { alertbotApi, type AlertbotStatus } from '@/lib/api';
  * Управление тем же CLI, что и у бота-администратора: панель показывает
  * состояние и нажимает кнопки.
  */
-export function AlertbotPanel({ onChanged }: { onChanged?: () => void | Promise<void> } = {}) {
+export function AlertbotPanel({
+  onChanged,
+  reloadSignal,
+}: {
+  onChanged?: () => void | Promise<void>;
+  /** Меняется, когда карточка выбора наверху что-то переключила: тогда эта
+   *  карточка обязана перечитать себя, иначе покажет прежнее состояние. */
+  reloadSignal?: number;
+} = {}) {
   const [status, setStatus] = useState<AlertbotStatus | null>(null);
   const [supported, setSupported] = useState(true);
   const [message, setMessage] = useState('');
@@ -47,14 +55,22 @@ export function AlertbotPanel({ onChanged }: { onChanged?: () => void | Promise<
     }
   }, []);
 
+  // По завершении операции перечитываем не только себя: установка сторожа
+  // меняет и картину наверху, в карточке выбора активного бота. Иначе она
+  // показывает вчерашнее состояние до перезагрузки страницы.
+  const refresh = useCallback(async () => {
+    await load();
+    await onChanged?.();
+  }, [load, onChanged]);
+
   // start обязателен: без него хук не начинает опрашивать операцию, и страница
   // выглядит так, будто нажатие ничего не сделало, — а ошибка всплывает только
   // после перезагрузки.
-  const { operation, start, dismiss, running: installing } = useMtproxylOperation(load, ['alertbot:']);
+  const { operation, start, dismiss, running: installing } = useMtproxylOperation(refresh, ['alertbot:']);
 
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, reloadSignal]);
 
   const act = async (fn: () => Promise<unknown>) => {
     setBusy(true);
