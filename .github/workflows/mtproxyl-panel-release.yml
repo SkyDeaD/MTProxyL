@@ -123,4 +123,6 @@ jobs:
             mtproxyl-panel/release/*.sha256
             mtproxyl-panel/release/checksums.txt
           body_path: mtproxyl-panel/RELEASE_NOTES.md
-          generate_release_notes: true
+          # Автосписок коммитов здесь не нужен: тестовая сборка описывается
+          # тем, что она даёт и как её поставить, а не историей правок.
+          generate_release_notes: false
