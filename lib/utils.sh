@@ -403,7 +403,7 @@ authorship_line() {
         _owner="${_owner%%/*}"
     fi
     if [ -n "$_owner" ] && [ "$_owner" != "Liafanx" ]; then
-        printf 'by LiafanX · форк %s' "$_owner"
+        printf 'by LiafanX · fork by %s' "$_owner"
     else
         printf 'by LiafanX'
     fi
