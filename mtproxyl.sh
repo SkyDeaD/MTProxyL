@@ -42,6 +42,11 @@ if [ -z "$GITHUB_REPO" ] && [ -r "${INSTALL_DIR}/.repo" ]; then
     GITHUB_REPO=$(tr -cd 'A-Za-z0-9._/-' < "${INSTALL_DIR}/.repo" 2>/dev/null)
 fi
 [ -n "$GITHUB_REPO" ] || GITHUB_REPO="Liafanx/MTProxyL"
+# Репозиторий, где лежат готовые сборки: PQ-nginx собирается часами и
+# публикуется релизом у автора. Форки код меняют, а сборки не дублируют —
+# поэтому за ними ходим туда всегда, иначе установка Selfmask падает на
+# несуществующем релизе.
+UPSTREAM_REPO="${MTPROXYL_UPSTREAM_REPO:-Liafanx/MTProxyL}"
 # Ветка, из которой берутся обновления и библиотеки при self-update.
 # Релизная — main; если установка шла из другой ветки, её имя лежит
 # в ${INSTALL_DIR}/.branch и обновления идут оттуда же.

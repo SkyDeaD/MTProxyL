@@ -6,6 +6,10 @@ PANEL_SERVICE="mtproxyl-panel"
 PANEL_BINARY="/usr/local/bin/mtproxyl-panel"
 PANEL_CONFIG_DIR="/etc/mtproxyl-panel"
 PANEL_INSTALLER_URL="${GITHUB_RAW}/mtproxyl-panel/install.sh"
+# Установщик панели берётся из того же репозитория, что и код, — иначе выходит
+# рассинхрон: скрипт из форка, а бинарник панели из апстрима. Сам установщик
+# читает эту переменную; без неё он по умолчанию идёт к автору.
+export MTPROXYL_PANEL_REPO="${MTPROXYL_PANEL_REPO:-$GITHUB_REPO}"
 
 panel_installed() {
     [ -x "$PANEL_BINARY" ]

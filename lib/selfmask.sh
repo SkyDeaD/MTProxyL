@@ -581,7 +581,9 @@ _selfmask_install_pq_nginx() {
     esac
 
     local _archive="mtproxyl-pq-nginx-${SELFMASK_PQ_NGINX_VERSION}-openssl${SELFMASK_PQ_OPENSSL_VERSION}-linux-${_arch}.tar.gz"
-    local _url="https://github.com/${GITHUB_REPO}/releases/download/${SELFMASK_PQ_RELEASE_TAG}/${_archive}"
+    # UPSTREAM_REPO, а не GITHUB_REPO: в форке этих сборок нет и не будет —
+    # компилировать nginx с post-quantum OpenSSL ради копии релиза незачем.
+    local _url="https://github.com/${UPSTREAM_REPO:-Liafanx/MTProxyL}/releases/download/${SELFMASK_PQ_RELEASE_TAG}/${_archive}"
     local _tmp="/tmp/${_archive}"
 
     if ! curl -fsSL --max-time 180 "$_url" -o "$_tmp" 2>/dev/null; then
