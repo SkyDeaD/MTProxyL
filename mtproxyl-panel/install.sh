@@ -928,6 +928,33 @@ do_install() {
     [ -n "${_cfg_script:-}" ] && MTPROXYL_SCRIPT="$_cfg_script"
     _cfg_dir=$(toml_value "$CONFIG_FILE" mtproxyl install_dir || true)
     [ -n "${_cfg_dir:-}" ] && MTPROXYL_INSTALL_DIR="$_cfg_dir"
+    # Обновления панель ищет в том репозитории, что записан здесь, а без записи
+    # уходит к автору. Панель, поставленная из форка, без этой строки однажды
+    # предложит обновиться на сборку автора и затрёт сама себя.
+    _cfg_repo=$(toml_value "$CONFIG_FILE" panel github_repo || true)
+    if [ "${_cfg_repo:-}" != "$REPO" ]; then
+      _cfg_tmp=$(mktemp) || die "Не удалось создать временный файл"
+      awk -v repo="$REPO" '
+        /^[[:space:]]*\[/ {
+          in_panel = ($0 ~ /^[[:space:]]*\[panel\][[:space:]]*$/)
+          print
+          if (in_panel) { print "github_repo = \"" repo "\""; done = 1 }
+          next
+        }
+        in_panel && /^[[:space:]]*github_repo[[:space:]]*=/ { next }
+        { print }
+        END {
+          if (!done) {
+            print ""
+            print "[panel]"
+            print "github_repo = \"" repo "\""
+          }
+        }
+      ' "$CONFIG_FILE" > "$_cfg_tmp" || die "Не удалось обновить $CONFIG_FILE"
+      write_root "$CONFIG_FILE" < "$_cfg_tmp"
+      rm -f "$_cfg_tmp"
+      say "Обновления панели будут приходить из ${REPO}"
+    fi
     $SUDO chown "$SYSTEM_USER:$SYSTEM_USER" "$CONFIG_FILE"
     $SUDO chmod 600 "$CONFIG_FILE"
   else
@@ -1203,6 +1230,7 @@ service_name = \"$TELEMT_SERVICE\""
 [panel]
 binary_path = \"$PANEL_BINARY_PATH\"
 service_name = \"$SERVICE_NAME\"
+github_repo = \"$REPO\"
 
 [mtproxyl]
 enabled = $MTPROXYL_ENABLED
