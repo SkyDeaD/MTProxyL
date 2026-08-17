@@ -251,6 +251,68 @@ build_faketls_secret() {
     fi
 }
 
+# Какие виды ссылок движок принимает прямо сейчас — по одному имени в строке,
+# в том же порядке, в каком telemt печатает их в журнале при запуске.
+# У менеджера правду знает settings.conf: конфиг движка мы из него и
+# генерируем. В режиме супер эксперта и у чужой цели конфиг ведём не мы,
+# поэтому режимы читаем прямо из [general.modes]; ключа там нет — берём
+# умолчание telemt (classic и secure выключены, tls включён).
+engine_link_modes() {
+    local _cfg="${1:-}"
+    if [ -z "$_cfg" ] \
+        && [ "${MTPROXYL_MODE:-manager}" = "manager" ] \
+        && ! _superexpert_active 2>/dev/null; then
+        [ "${MASKING_ENABLED:-true}" = "false" ] && echo "secure"
+        echo "tls"
+        return 0
+    fi
+    [ -n "$_cfg" ] || _cfg=$(_engine_config_path 2>/dev/null)
+    local _c="" _s="" _t=""
+    if [ -n "$_cfg" ] && [ -f "$_cfg" ]; then
+        _c=$(_toml_get_string_in_section "general.modes" "classic" "$_cfg" 2>/dev/null)
+        _s=$(_toml_get_string_in_section "general.modes" "secure"  "$_cfg" 2>/dev/null)
+        _t=$(_toml_get_string_in_section "general.modes" "tls"     "$_cfg" 2>/dev/null)
+    fi
+    [ "$_c" = "true" ] && echo "classic"
+    [ "$_s" = "true" ] && echo "secure"
+    [ "$_t" != "false" ] && echo "tls"
+    return 0
+}
+
+# Строки "вид|секрет" на один сырой секрет — по строке на каждый включённый
+# вид ссылки. Пока маскировка была единственным переключателем, хватало
+# одного секрета; с выключенной маскировкой движок принимает и dd, и ee, и
+# показывать только один из них значило бы прятать половину рабочих ссылок.
+build_link_secrets() {
+    local _raw="$1" _domain="${2:-$PROXY_DOMAIN}" _cfg="${3:-}"
+    local _mode _hex="" _has_dd=""
+    while read -r _mode; do
+        case "$_mode" in
+            classic) printf 'classic|%s\n' "$_raw" ;;
+            secure)  _has_dd=1; printf 'secure|dd%s\n' "$_raw" ;;
+            tls)
+                # ee без домена — не ссылка, а обрубок. Отдаём вместо неё dd:
+                # так вело себя и старое построение ссылок.
+                if [ -z "$_domain" ]; then
+                    [ -n "$_has_dd" ] || printf 'secure|dd%s\n' "$_raw"
+                    continue
+                fi
+                [ -n "$_hex" ] || _hex=$(domain_to_hex "$_domain")
+                printf 'tls|ee%s%s\n' "$_raw" "$_hex" ;;
+        esac
+    done < <(engine_link_modes "$_cfg")
+}
+
+# Как называть вид ссылки в меню.
+link_kind_title() {
+    case "$1" in
+        classic) echo "classic" ;;
+        secure)  echo "dd · secure" ;;
+        tls)     echo "ee · TLS" ;;
+        *)       echo "$1" ;;
+    esac
+}
+
 _iso_to_epoch() {
     local ts="$1"
     [ -z "$ts" ] && { echo "0"; return; }
@@ -435,7 +497,9 @@ check_for_update() {
     local _remote_ver
     _remote_ver=$(curl -fsS --max-time 5 "${GITHUB_RAW}/version" 2>/dev/null | tr -d '[:space:]')
     [ -z "$_remote_ver" ] && return 0
-    if [ "$_remote_ver" != "$VERSION" ]; then
+    # Только строго новее: на dev-сборке локальная версия обгоняет ветку, и
+    # «доступно обновление 1.4.9 → 1.4.8» звалось бы откатом назад.
+    if _version_gt "$_remote_ver" "$VERSION"; then
         _UPDATE_AVAILABLE="$_remote_ver"
     else
         _UPDATE_AVAILABLE=""
@@ -534,7 +598,7 @@ self_update() {
     if [ -z "$_lib_list" ]; then
         log_warn "Не удалось извлечь список библиотек из нового скрипта"
         log_info "Используем резервный список"
-        _lib_list="colors utils settings secrets config docker engine traffic geoblock geoip upstream backup nft selfmask panel detect tui_main tui_proxy tui_secrets tui_links tui_settings tui_security tui_traffic tui_engine tui_backup tui_expert tui_nft tui_selfmask tui_addons tui_detect expert_catalog expert_mode settings_cli install"
+        _lib_list="colors utils settings secrets config docker engine traffic availability dc warp tui_warp tgbot tui_tgbot alertbot tui_alertbot geoblock geoip upstream backup nft selfmask panel detect tui_main tui_proxy tui_secrets tui_links tui_settings tui_security tui_traffic tui_engine tui_backup tui_expert tui_nft tui_selfmask tui_addons tui_detect expert_catalog expert_mode settings_cli install"
     fi
 
     local _total=0 _ok=0 _failed=0 _skipped=0
@@ -819,11 +883,13 @@ show_cli_help() {
     echo -e "  ${BOLD}Selfmask:${NC}       selfmask status|setup|apply|set|settable|verify|disable|menu"
     echo -e "  ${BOLD}Веб-панель:${NC}     panel status|install|restart|password|uninstall"
     echo -e "  ${BOLD}Телеграм-бот:${NC}   tgbot status|install|setup|start|stop|restart|logs|uninstall"
+    echo -e "  ${BOLD}Бот-сторож:${NC}     alertbot status|install|update|set|use|uninstall"
     echo -e "  ${BOLD}PQ проверка:${NC}    pq-check [домен[:порт]]"
     echo -e "  ${BOLD}Безопасность:${NC}   geoblock add|remove|list | upstream list|add|remove | sni-policy"
     echo -e "  ${BOLD}Мониторинг:${NC}     traffic | connections | metrics [live] | logs | health | info"
     echo -e "  ${BOLD}История IP:${NC}     ip-history status|flush|on|off"
     echo -e "  ${BOLD}Доступность:${NC}    availability status|check|details|target|on|off|token"
+    echo -e "  ${BOLD}Telegram/WARP:${NC}  warp status|on socks|on iface|off|scan|location|endpoint|proto"
     echo -e "  ${BOLD}Бэкапы:${NC}         backup [--encrypt] | restore <файл>"
     echo -e "  ${BOLD}Reanimator:${NC}     mode [manager|reanimator] | detect | edit-config\n                  install-telemt | uninstall-telemt"
     echo -e "  ${BOLD}Система:${NC}        install | menu | update [--no-restart] | update-check | uninstall\n                  version | help"

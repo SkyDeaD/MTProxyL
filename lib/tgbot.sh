@@ -144,8 +144,13 @@ _tgbot_warn_low_disk() {
 
 # Скачивание с проверкой синтаксиса до подмены: битый файл не должен попасть
 # в рабочий каталог и уронить службу при следующем перезапуске.
+# Список изменившихся файлов пригодится вызывающему: если поменялся
+# requirements.txt, одним кодом дело не обойдётся — нужен и venv.
+_TGBOT_DEPS_CHANGED="false"
+
 _tgbot_fetch_sources() {
-    local _file _url _tmp _failed=0
+    local _file _url _tmp _failed=0 _changed=0
+    _TGBOT_DEPS_CHANGED="false"
     mkdir -p "${TGBOT_DIR}/bot"
 
     # Установка из локальной копии репозитория: MTPROXYL_TGBOT_SRC=/path/to/repo
@@ -153,7 +158,13 @@ _tgbot_fetch_sources() {
     if [ -n "${MTPROXYL_TGBOT_SRC:-}" ] && [ -d "${MTPROXYL_TGBOT_SRC}/bot" ]; then
         for _file in "${_TGBOT_FILES[@]}"; do
             [ -f "${MTPROXYL_TGBOT_SRC}/${_file}" ] || { _failed=$((_failed + 1)); continue; }
-            install -m 644 "${MTPROXYL_TGBOT_SRC}/${_file}" "${TGBOT_DIR}/${_file}"
+            if cmp -s "${MTPROXYL_TGBOT_SRC}/${_file}" "${TGBOT_DIR}/${_file}" 2>/dev/null; then
+                echo -e "    ${DIM}= ${_file} — без изменений${NC}"
+            else
+                install -m 644 "${MTPROXYL_TGBOT_SRC}/${_file}" "${TGBOT_DIR}/${_file}"
+                echo -e "    ${GREEN}↻${NC} ${_file} — обновлён"
+                [ "$_file" = "requirements.txt" ] && _TGBOT_DEPS_CHANGED="true"
+            fi
         done
         find "${TGBOT_DIR}" -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null
         [ "$_failed" -eq 0 ] || return 1
@@ -175,9 +186,20 @@ _tgbot_fetch_sources() {
             _failed=$((_failed + 1))
             continue
         fi
-        mv -f "$_tmp" "${TGBOT_DIR}/${_file}"
-        chmod 644 "${TGBOT_DIR}/${_file}"
+        # Видно, что именно приехало: обновление кода бота идёт из панели и
+        # из меню, и одна строка «обновляем» на полминуты выглядит зависанием.
+        if cmp -s "$_tmp" "${TGBOT_DIR}/${_file}" 2>/dev/null; then
+            rm -f "$_tmp"
+            echo -e "    ${DIM}= ${_file} — без изменений${NC}"
+        else
+            mv -f "$_tmp" "${TGBOT_DIR}/${_file}"
+            chmod 644 "${TGBOT_DIR}/${_file}"
+            echo -e "    ${GREEN}↻${NC} ${_file} — обновлён"
+            _changed=$((_changed + 1))
+            [ "$_file" = "requirements.txt" ] && _TGBOT_DEPS_CHANGED="true"
+        fi
     done
+    log_info "Файлов обновлено: ${_changed} из ${#_TGBOT_FILES[@]}"
 
     find "${TGBOT_DIR}" -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null
     [ "$_failed" -eq 0 ] || return 1
@@ -256,6 +278,8 @@ ${TGBOT_USER} ALL=(root) NOPASSWD: ${_script} secret enable [A-Za-z0-9]*
 ${TGBOT_USER} ALL=(root) NOPASSWD: ${_script} secret disable [A-Za-z0-9]*
 ${TGBOT_USER} ALL=(root) NOPASSWD: ${_script} secret rename [A-Za-z0-9]* [A-Za-z0-9]*
 ${TGBOT_USER} ALL=(root) NOPASSWD: ${_script} secret setlimits [A-Za-z0-9]* * * * *
+${TGBOT_USER} ALL=(root) NOPASSWD: ${_script} secret adtag [A-Za-z0-9]* *
+${TGBOT_USER} ALL=(root) NOPASSWD: ${_script} dc status --json
 ${TGBOT_USER} ALL=(root) NOPASSWD: ${_script} secret link [A-Za-z0-9]*
 
 # Доступность из России
@@ -503,13 +527,13 @@ tgbot_set_param() {
 
     local _expr=""
     case "$_key" in
-        notify.availability|notify.proxy|notify.limits|notify.backup)
+        notify.availability|notify.dc|notify.proxy|notify.limits|notify.backup)
             case "$_val" in
                 true|false) ;;
                 *) log_error "Ожидается true или false"; return 1 ;;
             esac
             _expr=".${_key} = ${_val}" ;;
-        intervals.availability|intervals.proxy|intervals.limits)
+        intervals.availability|intervals.dc|intervals.proxy|intervals.limits)
             [[ "$_val" =~ ^[0-9]+$ ]] && [ "$_val" -ge 1 ] && [ "$_val" -le 1440 ] || {
                 log_error "Ожидается число от 1 до 1440"; return 1; }
             _expr=".${_key} = ${_val}" ;;
@@ -519,13 +543,25 @@ tgbot_set_param() {
                 *) log_error "Ожидается true или false"; return 1 ;;
             esac
             _expr=".${_key} = ${_val}" ;;
+        proxy)
+            # Пусто — ходим в Telegram напрямую. Иначе только socks5: схему
+            # проверяем здесь, потому что дальше её увидит уже сам aiogram, и
+            # опечатка обернулась бы падением службы при старте.
+            if [ -z "$_val" ] || [ "$_val" = "off" ] || [ "$_val" = "none" ]; then
+                _expr='.proxy = ""'
+            elif [[ "$_val" =~ ^socks5h?://([^:/@[:space:]]+(:[^@/[:space:]]*)?@)?[A-Za-z0-9._-]+:[0-9]{1,5}$ ]]; then
+                _expr=".proxy = \"${_val}\""
+            else
+                log_error "Ожидается socks5://[логин:пароль@]хост:порт или 'off'"
+                return 1
+            fi ;;
         autobackup.time)
             [[ "$_val" =~ ^([01]?[0-9]|2[0-3]):[0-5][0-9]$ ]] || {
                 log_error "Ожидается время в формате ЧЧ:ММ"; return 1; }
             _expr=".${_key} = \"${_val}\"" ;;
         *)
             log_error "Неизвестная настройка: ${_key}"
-            log_info "Доступны: notify.*, intervals.*, autobackup.*"
+            log_info "Доступны: notify.*, intervals.*, autobackup.*, proxy"
             return 1 ;;
     esac
 
@@ -735,13 +771,36 @@ tgbot_remove_admin() {
 # перекачать десяток файлов быстро.
 tgbot_update_sources() {
     tgbot_installed || return 0
+
+    log_info "Код бота: качаем из ветки ${GITHUB_BRANCH}"
     _tgbot_fetch_sources || return 1
+
+    # Зависимости меняются редко, поэтому venv трогаем, только если приехал
+    # новый requirements.txt: иначе каждое обновление стоило бы минуты pip.
+    if [ "${_TGBOT_DEPS_CHANGED}" = "true" ]; then
+        log_info "Изменился список зависимостей — обновляем venv (может занять минуту)"
+        _tgbot_build_venv || log_warn "Зависимости обновить не удалось — бот запустится на старых"
+    else
+        log_info "Зависимости не менялись — venv оставляем как есть"
+    fi
+
     # Права переписываем вместе с кодом: новая версия бота может звать
     # подкоманду, которой в старом списке нет, и упереться в отказ sudo.
+    log_info "Обновляем права sudo бота"
     _tgbot_write_sudoers || log_warn "Права sudo обновить не удалось"
+
     chown -R "$TGBOT_USER":"$TGBOT_USER" "$TGBOT_DIR" 2>/dev/null || true
     chmod 600 "$TGBOT_CONFIG" 2>/dev/null || true
+
+    log_info "Перезапускаем службу ${TGBOT_SERVICE}"
     systemctl restart "$TGBOT_SERVICE" 2>/dev/null || true
+    sleep 1
+    if tgbot_service_active; then
+        log_success "Бот работает"
+    else
+        log_warn "Бот не поднялся — журнал: journalctl -u ${TGBOT_SERVICE} -n 30"
+        journalctl -u "$TGBOT_SERVICE" -n 5 --no-pager 2>/dev/null | sed 's/^/    /'
+    fi
     return 0
 }
 

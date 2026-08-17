@@ -22,12 +22,14 @@ STATE_PATH = Path(os.environ.get("MTPROXYL_TGBOT_STATE", "/opt/mtproxyl-tgbot/st
 # бот только сверяется с результатом — поэтому здесь можно и почаще.
 DEFAULT_NOTIFY = {
     "availability": True,
+    "dc": True,
     "proxy": True,
     "backup": True,
     "limits": True,
 }
 DEFAULT_INTERVALS = {
     "availability": 15,
+    "dc": 15,
     "proxy": 5,
     "limits": 60,
 }
@@ -45,6 +47,10 @@ class Config:
     notify: dict[str, bool] = field(default_factory=lambda: dict(DEFAULT_NOTIFY))
     intervals: dict[str, int] = field(default_factory=lambda: dict(DEFAULT_INTERVALS))
     autobackup: dict[str, Any] = field(default_factory=lambda: dict(DEFAULT_AUTOBACKUP))
+    # Локальный SOCKS5 на случай, когда серверы Telegram с хоста недоступны:
+    # "socks5://127.0.0.1:1080". Пусто — ходим напрямую. Поднимает прокси сам
+    # владелец сервера, MTProxyL его не ставит и не сторожит.
+    proxy: str = ""
 
     def notify_on(self, key: str) -> bool:
         return bool(self.notify.get(key, DEFAULT_NOTIFY.get(key, True)))
@@ -64,6 +70,7 @@ class Config:
             "notify": self.notify,
             "intervals": self.intervals,
             "autobackup": self.autobackup,
+            "proxy": self.proxy,
         }
 
 
@@ -95,6 +102,7 @@ def load(force: bool = False) -> Config:
         notify={**DEFAULT_NOTIFY, **(raw.get("notify") or {})},
         intervals={**DEFAULT_INTERVALS, **(raw.get("intervals") or {})},
         autobackup={**DEFAULT_AUTOBACKUP, **(raw.get("autobackup") or {})},
+        proxy=str(raw.get("proxy") or ""),
     )
     _cached, _cached_mtime = cfg, mtime
     return cfg

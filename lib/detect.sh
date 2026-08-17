@@ -169,14 +169,35 @@ _telemt_api_enabled() {
     [ "$_en" != "false" ]
 }
 
+# Адрес, по которому API цели виден с хоста. У контейнера в bridge-сети своя
+# петля: 127.0.0.1 внутри него — это он сам, а не мы, и достучаться туда с
+# хоста нельзя ни при каких портах. Зато его адрес в сети docker доступен —
+# если движок слушает не только петлю. Публикация порта (-p) тоже подходит и
+# ловится обычной проверкой 127.0.0.1, поэтому её пробуем первой.
+_telemt_api_host() {
+    [ "${DETECTED_NETWORK_MODE:-host}" = "bridge" ] || { echo "127.0.0.1"; return 0; }
+    local _port; _port=$(_get_telemt_api_port "${1:-$DETECTED_CONFIG_PATH}")
+    if curl -s -o /dev/null --max-time 1 --connect-timeout 1 "http://127.0.0.1:${_port}/v1/health" 2>/dev/null; then
+        echo "127.0.0.1"
+        return 0
+    fi
+    local _cip; _cip=$(docker_container_ip 2>/dev/null)
+    if [ -n "$_cip" ]; then
+        echo "$_cip"
+        return 0
+    fi
+    echo "127.0.0.1"
+}
+
 # JSON с /v1/users API цели.
 # Коды: 0 — успех, 2 — API выключен в конфиге, 3 — включён, но не отвечает.
 _get_telemt_users_json() {
     local _cfg="${1:-$DETECTED_CONFIG_PATH}"
     _telemt_api_enabled "$_cfg" || return 2
     local _port; _port=$(_get_telemt_api_port "$_cfg")
+    local _host; _host=$(_telemt_api_host "$_cfg")
     local _json
-    _json=$(curl -s --max-time 3 --connect-timeout 2 "http://127.0.0.1:${_port}/v1/users" 2>/dev/null) || return 3
+    _json=$(curl -s --max-time 3 --connect-timeout 2 "http://${_host}:${_port}/v1/users" 2>/dev/null) || return 3
     [ -z "$_json" ] && return 3
     grep -qE '"ok"[[:space:]]*:[[:space:]]*false' <<< "$_json" && return 3
     grep -q '"data"' <<< "$_json" || return 3
@@ -195,7 +216,47 @@ _telemt_api_unavailable_reason() {
         echo "[server.api] enabled = false в конфиге цели"
         return
     fi
-    echo "API не отвечает на 127.0.0.1:$(_get_telemt_api_port "$_cfg")"
+    local _port; _port=$(_get_telemt_api_port "$_cfg")
+    if [ "${DETECTED_NETWORK_MODE:-host}" = "bridge" ]; then
+        local _listen; _listen=$(_toml_get_string_in_section "server.api" "listen" "$_cfg")
+        case "${_listen}" in
+            127.*|localhost*|"[::1]"*)
+                echo "цель в Docker bridge, а API слушает петлю контейнера ${_listen} — снаружи она недоступна"
+                return ;;
+        esac
+        echo "API не отвечает на $(_telemt_api_host "$_cfg"):${_port} (цель в Docker bridge)"
+        return
+    fi
+    echo "API не отвечает на 127.0.0.1:${_port}"
+}
+
+# Что делать, когда API цели в контейнере недоступен. Печатается там же, где
+# показана причина: без этого совет «включите API» не помогает — он уже включён.
+_telemt_api_bridge_hint() {
+    [ "${DETECTED_NETWORK_MODE:-host}" = "bridge" ] || return 0
+    local _cfg="${1:-$DETECTED_CONFIG_PATH}"
+    local _port; _port=$(_get_telemt_api_port "$_cfg")
+    local _cip; _cip=$(docker_container_ip 2>/dev/null)
+    echo ""
+    echo -e "  ${BOLD}Цель работает в Docker bridge.${NC}"
+    echo -e "  ${DIM}127.0.0.1 внутри контейнера — сам контейнер, а не хост,${NC}"
+    echo -e "  ${DIM}поэтому API, привязанный к петле, с хоста не виден.${NC}"
+    echo ""
+    echo -e "  ${DIM}В конфиге цели:${NC}"
+    echo -e "    ${GREEN}[server.api]${NC}"
+    echo -e "    ${GREEN}enabled = true${NC}"
+    echo -e "    ${GREEN}listen = \"0.0.0.0:${_port}\"${NC}"
+    echo -e "    ${GREEN}whitelist = [\"127.0.0.0/8\", \"172.16.0.0/12\", \"10.0.0.0/8\"]${NC}"
+    echo -e "  ${DIM}Белый список важен: с хостом контейнер общается через адрес${NC}"
+    echo -e "  ${DIM}сети docker, и со списком по умолчанию (только 127.0.0.0/8)${NC}"
+    echo -e "  ${DIM}движок отклонит наши запросы уже после подключения.${NC}"
+    echo ""
+    if [ -n "$_cip" ]; then
+        echo -e "  ${DIM}После перезапуска цели MTProxyL сам пойдёт на ${_cip}:${_port}.${NC}"
+    fi
+    echo -e "  ${DIM}Наружу это не открывает: порт контейнера доступен только${NC}"
+    echo -e "  ${DIM}хосту, пока он не опубликован через -p.${NC}"
+    echo -e "  ${DIM}Другой путь — опубликовать порт: -p 127.0.0.1:${_port}:${_port}${NC}"
 }
 
 # Строки «пользователь|tg-ссылка» из ответа API цели, только IPv4.
@@ -229,6 +290,7 @@ show_target_links_ipv4() {
     if [ $_rc -ne 0 ]; then
         log_warn "Ссылки недоступны: $(_telemt_api_unavailable_reason)"
         [ $_rc -eq 2 ] && log_info "Включите [server.api] enabled = true в ${DETECTED_CONFIG_PATH:-конфиге цели} и перезапустите цель"
+        _telemt_api_bridge_hint
         return 1
     fi
 
@@ -363,6 +425,23 @@ _engine_config_path() {
     else
         printf '%s' "${CONFIG_DIR}/config.toml"
     fi
+}
+
+# Строки "пользователь|enabled|соединения|уник. IP|октеты" из API движка
+# текущего режима. Уникальные IP есть только у API: Prometheus их не считает,
+# поэтому в режиме менеджера без этого вызова колонка всегда была нулевой.
+_engine_user_stats() {
+    local _json
+    _json=$(_get_telemt_users_json "$(_engine_config_path)" 2>/dev/null) || return 1
+    _target_user_stats "$_json"
+}
+
+# Сумма активных уникальных IP по движку текущего режима.
+# Ненулевой код возврата = API недоступен, показывать «н/д», а не ноль.
+_engine_unique_ips() {
+    local _json
+    _json=$(_get_telemt_users_json "$(_engine_config_path)" 2>/dev/null) || return 1
+    _json_sum_field "$_json" "active_unique_ips"
 }
 
 # Отвечает ли Prometheus-эндпоинт цели. Метрики движка в telemt по
@@ -530,16 +609,19 @@ TARGET_STATS_OCTETS=0
 TARGET_STATS_CONNS=0
 TARGET_STATS_ACTIVE=0
 TARGET_STATS_DISABLED=0
+TARGET_STATS_IPS=0
 
 fetch_target_stats() {
     TARGET_STATS_OCTETS=0
     TARGET_STATS_CONNS=0
     TARGET_STATS_ACTIVE=0
     TARGET_STATS_DISABLED=0
+    TARGET_STATS_IPS=0
     local _json
     _json=$(_get_telemt_users_json) || return 1
     TARGET_STATS_OCTETS=$(_json_sum_field "$_json" "total_octets")
     TARGET_STATS_CONNS=$(_json_sum_field "$_json" "current_connections")
+    TARGET_STATS_IPS=$(_json_sum_field "$_json" "active_unique_ips")
     TARGET_STATS_ACTIVE=$(_json_count_bool_field "$_json" "enabled" "true")
     TARGET_STATS_DISABLED=$(_json_count_bool_field "$_json" "enabled" "false")
     # Если версия API не отдаёт "enabled" — считаем всех найденных
@@ -1717,6 +1799,35 @@ run_reanimator_installer() {
         # и только потом уходим в ручной путь к конфигу.
         if _no_telemt_target; then
             offer_install_original_telemt && run_target_detection >/dev/null 2>&1 || true
+        fi
+    fi
+
+    # Прокси на сервере может быть не telemt вовсе: свой, teleproxy, что угодно.
+    # Тогда движок нам не нужен целиком — нужны только фиксы хоста, и спрашивать
+    # про конфиг, порт и домен незачем.
+    if _no_telemt_target && { [ -z "${DETECTED_CONFIG_PATH:-}" ] || [ ! -f "${DETECTED_CONFIG_PATH:-}" ]; }; then
+        echo ""
+        echo -e "  ${BOLD}Нужны только оптимизация и фиксы?${NC}"
+        echo -e "  ${DIM}Если прокси у вас свой — другая реализация MTProto или${NC}"
+        echo -e "  ${DIM}вообще другой сервис — MTProxyL может работать как набор${NC}"
+        echo -e "  ${DIM}host-фиксов: zapret2, SYN-лимитер, оптимизация By-MEKO,${NC}"
+        echo -e "  ${DIM}гео-блокировка, дополнения. Конфиг и домен не спросим,${NC}"
+        echo -e "  ${DIM}про отсутствие telemt больше не напомним.${NC}"
+        echo -en "  ${BOLD}Включить режим «только оптимизация»? [y/N]:${NC} "
+        local _tools_yn; read_line _tools_yn
+        if [[ "$_tools_yn" =~ ^[yY] ]]; then
+            TOOLS_ONLY="true"
+            MTPROXYL_MODE="reanimator"
+            DETECTED_MODE="none"
+            DETECTED_NETWORK_MODE="host"
+            PROXY_PORT="${DETECTED_PORT:-443}"
+            save_settings
+            save_detect_settings 2>/dev/null || true
+            log_success "Режим «только оптимизация» включён"
+            log_info "Фиксы настраиваются в меню «NFT лимитер, Zapret2 и фиксы»"
+            log_info "Вернуть работу с движком: Цель / режим → «Только оптимизация»"
+            show_main_menu
+            return 0
         fi
     fi
 

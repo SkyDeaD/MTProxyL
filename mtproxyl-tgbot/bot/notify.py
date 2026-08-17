@@ -46,6 +46,62 @@ def _mark(state: dict, key: str) -> None:
     state.setdefault("last_run", {})[key] = time.time()
 
 
+# ── Дата-центры Telegram ─────────────────────────────────────────────────────
+
+async def check_dc(bot: Bot, state: dict) -> None:
+    """Покрытие писателей к DC. Шлём не на каждой проверке, а на переходе
+    через порог — как и по доступности из России."""
+    try:
+        report = await cli.dc_status()
+    except CliError as exc:
+        log.debug("состояние DC недоступно: %s", exc)
+        return
+    # Нет данных или middle proxy выключен — сказать нечего: писателей к DC
+    # в прямом режиме не бывает, и это не поломка.
+    if not report.get("available"):
+        return
+
+    # Нулевой порог — предупреждения выключены целиком (mtproxyl dc threshold 0).
+    # Забываем и прошлое состояние: иначе после включения прилетит «просело»
+    # про давно прошедшую просадку.
+    threshold = int(report.get("threshold") or 0)
+    if threshold <= 0:
+        state.pop("dc_bad", None)
+        return
+
+    coverage = int(report.get("coverage_pct") or 0)
+    bad = coverage < threshold
+    was_bad = state.get("dc_bad")
+
+    if was_bad is None:
+        state["dc_bad"] = bad
+        if not bad:
+            return
+    elif was_bad == bad:
+        return
+    state["dc_bad"] = bad
+
+    rows = report.get("dcs") or []
+    weak = [d for d in rows if not d.get("ok")]
+    if bad:
+        listing = ", ".join(f"DC {d.get('dc')} — {int(d.get('coverage_pct') or 0)}%" for d in weak[:6])
+        text = (
+            f"🔴 <b>Связь с дата-центрами Telegram просела</b>\n\n"
+            f"Покрытие {coverage}% при пороге {threshold}%: живых писателей "
+            f"{report.get('alive_writers', 0)} из {report.get('required_writers', 0)}.\n"
+        )
+        if listing:
+            text += f"Просели: {esc(listing)}\n"
+        text += "\nПодробнее — /dc"
+    else:
+        text = (
+            f"🟢 <b>Связь с дата-центрами восстановилась</b>\n\n"
+            f"Покрытие {coverage}% — писателей {report.get('alive_writers', 0)} "
+            f"из {report.get('required_writers', 0)}."
+        )
+    await broadcast(bot, text)
+
+
 # ── Доступность ──────────────────────────────────────────────────────────────
 
 async def check_availability(bot: Bot, state: dict) -> None:
@@ -229,6 +285,8 @@ async def check_autobackup(bot: Bot, state: dict) -> None:
     for admin in cfg.admins:
         try:
             await bot.send_document(admin, BufferedInputFile(data, filename=name))
+            # Файл лёг поверх меню — возвращаем меню вниз, как после broadcast.
+            await ui.move_menu_down_in(bot, admin)
         except TelegramAPIError as exc:
             log.warning("не удалось отправить бэкап %s: %s", admin, exc)
 
@@ -242,6 +300,10 @@ async def run(bot: Bot) -> None:
         try:
             cfg = config.load()
             before = dict(state)
+
+            if cfg.notify_on("dc") and _due(state, "dc", cfg.interval("dc")):
+                _mark(state, "dc")
+                await check_dc(bot, state)
 
             if cfg.notify_on("availability") and _due(state, "availability", cfg.interval("availability")):
                 _mark(state, "availability")

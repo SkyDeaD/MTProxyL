@@ -20,7 +20,7 @@ export LC_NUMERIC=C
 export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a
 
-VERSION="1.4.8"
+VERSION="1.5.0"
 SCRIPT_NAME="mtproxyl"
 INSTALL_DIR="/opt/mtproxyl"
 CONFIG_DIR="${INSTALL_DIR}/mtproxy"
@@ -81,7 +81,7 @@ fi
 
 # Загрузка библиотек
 LIB_DIR="${INSTALL_DIR}/lib"
-for _lib in colors utils settings detect secrets config docker engine traffic availability geoblock geoip upstream backup nft selfmask panel tgbot alertbot tui_main tui_proxy tui_secrets tui_links tui_settings tui_security tui_traffic tui_engine tui_backup tui_expert tui_nft tui_selfmask tui_addons tui_tgbot tui_alertbot tui_detect expert_catalog expert_mode settings_cli install; do
+for _lib in colors utils settings detect secrets config docker engine traffic availability dc warp geoblock geoip upstream backup nft selfmask panel tgbot alertbot tui_main tui_proxy tui_secrets tui_links tui_settings tui_security tui_traffic tui_engine tui_backup tui_expert tui_nft tui_selfmask tui_addons tui_tgbot tui_alertbot tui_warp tui_detect expert_catalog expert_mode settings_cli install; do
     if [ -f "${LIB_DIR}/${_lib}.sh" ]; then
         # shellcheck source=/dev/null
         source "${LIB_DIR}/${_lib}.sh"
@@ -274,8 +274,9 @@ cli_main() {
                     # конфига цели, а не наш PROXY_DOMAIN.
                     _mode_sni=$(_current_sni_domain 2>/dev/null || echo "")
 
-                    printf '{"mode":"%s","detected_mode":"%s","detected_config":"%s","port":%d,"sni":"%s","engine_config":"%s","api_port":%d,"api_enabled":%s,"own_container":"%s","running":%s,"log_kind":"%s","log_target":"%s"}\n' \
+                    printf '{"mode":"%s","tools_only":%s,"detected_mode":"%s","detected_config":"%s","port":%d,"sni":"%s","engine_config":"%s","api_port":%d,"api_enabled":%s,"own_container":"%s","running":%s,"log_kind":"%s","log_target":"%s"}\n' \
                         "$(json_escape "${MTPROXYL_MODE:-manager}")" \
+                        "$([ "${TOOLS_ONLY:-false}" = "true" ] && echo true || echo false)" \
                         "$(json_escape "${DETECTED_MODE:-unknown}")" \
                         "$(json_escape "${DETECTED_CONFIG_PATH:-}")" \
                         "${PROXY_PORT:-0}" \
@@ -472,6 +473,19 @@ cli_main() {
             load_settings 2>/dev/null
             load_detect_settings 2>/dev/null
             handle_alertbot_command "$@"
+            ;;
+
+        dc)
+            # Данные о дата-центрах отдаёт движок текущего режима, значит нужны
+            # и настройки, и результат детекта: у реаниматора это чужая цель.
+            load_settings; load_detect_settings
+            handle_dc_command "$@"
+            ;;
+
+        warp)
+            # Вариант C правит маршруты движка, поэтому грузим и их.
+            load_settings; load_secrets; load_upstreams; load_detect_settings
+            handle_warp_command "$@"
             ;;
 
         availability)

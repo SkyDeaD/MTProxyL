@@ -11,6 +11,9 @@ declare -a SECRETS_MAX_IPS=()
 declare -a SECRETS_QUOTA=()
 declare -a SECRETS_EXPIRES=()
 declare -a SECRETS_NOTES=()
+# Рекламная метка на пользователя ([access.user_ad_tags] у движка). Пусто —
+# метки нет; общая метка из настроек остаётся в [general] и не отменяется.
+declare -a SECRETS_ADTAG=()
 
 save_secrets() {
     mkdir -p "$INSTALL_DIR"
@@ -18,12 +21,15 @@ save_secrets() {
     tmp=$(_mktemp "$INSTALL_DIR") || { log_error "Не удалось создать временный файл"; return 1; }
 
     echo "# MTProxyL — база секретов v${VERSION}" > "$tmp"
-    echo "# Формат: LABEL|SECRET|CREATED_TS|ENABLED|MAX_CONNS|MAX_IPS|QUOTA_BYTES|EXPIRES|NOTES" >> "$tmp"
+    echo "# Формат: LABEL|SECRET|CREATED_TS|ENABLED|MAX_CONNS|MAX_IPS|QUOTA_BYTES|EXPIRES|NOTES|AD_TAG" >> "$tmp"
 
     if [ ${#SECRETS_LABELS[@]} -gt 0 ]; then
         local i
         for i in "${!SECRETS_LABELS[@]}"; do
-            echo "${SECRETS_LABELS[$i]}|${SECRETS_KEYS[$i]}|${SECRETS_CREATED[$i]}|${SECRETS_ENABLED[$i]}|${SECRETS_MAX_CONNS[$i]:-0}|${SECRETS_MAX_IPS[$i]:-0}|${SECRETS_QUOTA[$i]:-0}|${SECRETS_EXPIRES[$i]:-0}|${SECRETS_NOTES[$i]:-}" >> "$tmp"
+            # Заметка идёт не последней, поэтому «|» в ней сдвинул бы поля —
+            # вырезаем разделитель, а не ломаем строку.
+            local _note="${SECRETS_NOTES[$i]:-}"; _note="${_note//|/ }"
+            echo "${SECRETS_LABELS[$i]}|${SECRETS_KEYS[$i]}|${SECRETS_CREATED[$i]}|${SECRETS_ENABLED[$i]}|${SECRETS_MAX_CONNS[$i]:-0}|${SECRETS_MAX_IPS[$i]:-0}|${SECRETS_QUOTA[$i]:-0}|${SECRETS_EXPIRES[$i]:-0}|${_note}|${SECRETS_ADTAG[$i]:-}" >> "$tmp"
         done
     fi
 
@@ -34,11 +40,11 @@ save_secrets() {
 load_secrets() {
     SECRETS_LABELS=(); SECRETS_KEYS=(); SECRETS_CREATED=(); SECRETS_ENABLED=()
     SECRETS_MAX_CONNS=(); SECRETS_MAX_IPS=(); SECRETS_QUOTA=()
-    SECRETS_EXPIRES=(); SECRETS_NOTES=()
+    SECRETS_EXPIRES=(); SECRETS_NOTES=(); SECRETS_ADTAG=()
 
     [ -f "$SECRETS_FILE" ] || return 0
 
-    while IFS='|' read -r label secret created enabled max_conns max_ips quota expires notes; do
+    while IFS='|' read -r label secret created enabled max_conns max_ips quota expires notes adtag; do
         [[ "$label" =~ ^[[:space:]]*# ]] && continue
         [[ "$label" =~ ^[[:space:]]*$ ]] && continue
         [ -z "$secret" ] && continue
@@ -66,7 +72,90 @@ load_secrets() {
         fi
         SECRETS_EXPIRES+=("$_ex")
         SECRETS_NOTES+=("${notes:-}")
+        # Поля метки нет в базах до 1.4.9 — там она просто пустая.
+        local _at="${adtag:-}"
+        [[ "$_at" =~ ^[0-9a-fA-F]{32}$ ]] || _at=""
+        SECRETS_ADTAG+=("$_at")
     done < "$SECRETS_FILE"
+}
+
+# Импорт: понимает и экспорт из меню, и файл базы секретов. Формат
+# распознаётся по третьему полю — у базы там метка времени (issue #29).
+secret_import_file() {
+    local _file="${1:-}"
+    [ -f "$_file" ] || { log_error "Файл не найден: ${_file}"; return 1; }
+
+    local _added=0 _dup=0 _bad=0 _line
+    while IFS= read -r _line || [ -n "$_line" ]; do
+        [[ "$_line" =~ ^[[:space:]]*# ]] && continue
+        [[ "$_line" =~ ^[[:space:]]*$ ]] && continue
+
+        local _oldIFS="$IFS"
+        declare -a _f=()
+        IFS='|' read -ra _f <<< "$_line"
+        IFS="$_oldIFS"
+
+        local _l="${_f[0]:-}" _k="${_f[1]:-}"
+        [[ "$_l" =~ ^[a-zA-Z0-9_-]+$ ]] && [ ${#_l} -le 32 ] || { _bad=$((_bad + 1)); continue; }
+        [[ "$_k" =~ ^[0-9a-fA-F]{32}$ ]] || { _bad=$((_bad + 1)); continue; }
+
+        local _cr _en _mc _mi _q _ex _n _at
+        if [[ "${_f[2]:-}" =~ ^[0-9]{9,}$ ]]; then
+            _cr="${_f[2]}";     _en="${_f[3]:-true}"; _mc="${_f[4]:-0}"; _mi="${_f[5]:-0}"
+            _q="${_f[6]:-0}";   _ex="${_f[7]:-0}";    _n="${_f[8]:-}";   _at="${_f[9]:-}"
+        else
+            _cr="$(date +%s)";  _en="${_f[2]:-true}"; _mc="${_f[3]:-0}"; _mi="${_f[4]:-0}"
+            _q="${_f[5]:-0}";   _ex="${_f[6]:-0}";    _n="${_f[7]:-}";   _at="${_f[8]:-}"
+        fi
+
+        local _i _exists=false
+        for _i in "${!SECRETS_LABELS[@]}"; do
+            [ "${SECRETS_LABELS[$_i]}" = "$_l" ] && { _exists=true; break; }
+        done
+        if $_exists; then _dup=$((_dup + 1)); continue; fi
+
+        # Те же проверки, что в load_secrets: чужой файл приносит что угодно.
+        [[ "$_mc" =~ ^[0-9]+$ ]] || _mc="0"
+        [[ "$_mi" =~ ^[0-9]+$ ]] || _mi="0"
+        [[ "$_q"  =~ ^[0-9]+$ ]] || _q="0"
+        [ "$_en" = "true" ] || [ "$_en" = "false" ] || _en="true"
+        if [ "$_ex" != "0" ] && ! [[ "$_ex" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}(T[0-9:Z+.-]+)?$ ]]; then
+            _ex="0"
+        fi
+        [[ "$_at" =~ ^[0-9a-fA-F]{32}$ ]] || _at=""
+
+        SECRETS_LABELS+=("$_l");   SECRETS_KEYS+=("$_k")
+        SECRETS_CREATED+=("$_cr"); SECRETS_ENABLED+=("$_en")
+        SECRETS_MAX_CONNS+=("$_mc"); SECRETS_MAX_IPS+=("$_mi")
+        SECRETS_QUOTA+=("$_q");    SECRETS_EXPIRES+=("$_ex")
+        SECRETS_NOTES+=("${_n//|/ }"); SECRETS_ADTAG+=("$_at")
+        _added=$((_added + 1))
+    done < "$_file"
+
+    if [ "$_added" -gt 0 ]; then
+        save_secrets
+        reload_proxy_config 2>/dev/null || true
+    fi
+    log_success "Импортировано: ${_added}, пропущено дубликатов: ${_dup}, строк с ошибкой: ${_bad}"
+    return 0
+}
+
+# Экспорт секретов в файл того же формата, что читает secret_import_file.
+secret_export_file() {
+    local _file="${1:-}"
+    [ -n "$_file" ] || { log_error "Требуется имя файла"; return 1; }
+
+    local _tmp; _tmp=$(_mktemp "$(dirname "$_file")") || { log_error "Не удалось создать временный файл"; return 1; }
+    echo "# label|key|enabled|max_conns|max_ips|quota|expires|notes|ad_tag" > "$_tmp"
+    local _i
+    for _i in "${!SECRETS_LABELS[@]}"; do
+        # «|» в заметке сдвинул бы поля при обратном импорте.
+        local _note="${SECRETS_NOTES[$_i]:-}"; _note="${_note//|/ }"
+        echo "${SECRETS_LABELS[$_i]}|${SECRETS_KEYS[$_i]}|${SECRETS_ENABLED[$_i]}|${SECRETS_MAX_CONNS[$_i]:-0}|${SECRETS_MAX_IPS[$_i]:-0}|${SECRETS_QUOTA[$_i]:-0}|${SECRETS_EXPIRES[$_i]:-0}|${_note}|${SECRETS_ADTAG[$_i]:-}" >> "$_tmp"
+    done
+    chmod 600 "$_tmp"
+    mv "$_tmp" "$_file"
+    log_success "Экспортировано ${#SECRETS_LABELS[@]} секретов в ${_file}"
 }
 
 # Добавить секрет
@@ -94,28 +183,40 @@ secret_add() {
     SECRETS_QUOTA+=("0")
     SECRETS_EXPIRES+=("0")
     SECRETS_NOTES+=("")
+    SECRETS_ADTAG+=("")
 
     save_secrets
     [ "$no_restart" != "true" ] && reload_proxy_config 2>/dev/null || true
 
-    local full_secret server_ip server_port
-    full_secret=$(build_faketls_secret "$raw_secret")
+    local server_ip server_port
     server_ip=$(proxy_link_host)
     server_port=$(proxy_link_port)
 
     log_success "Секрет '${label}' создан"
     echo ""
-    echo -e "  ${BOLD}Ссылка для Telegram:${NC}"
-    echo -e "  ${CYAN}tg://proxy?server=${server_ip}&port=${server_port}&secret=${full_secret}${NC}"
+    _print_secret_links "$server_ip" "$server_port" "$raw_secret" "true"
     echo ""
-    echo -e "  ${BOLD}Веб-ссылка:${NC}"
-    echo -e "  ${CYAN}https://t.me/proxy?server=${server_ip}&port=${server_port}&secret=${full_secret}${NC}"
+}
 
-    if command -v qrencode &>/dev/null; then
+# Ссылки одного секрета всех включённых видов. QR — только на первую: с
+# выключенной маскировкой видов два, и два QR-кода в терминале не помещаются.
+_print_secret_links() {
+    local _ip="$1" _port="$2" _raw="$3" _qr="${4:-false}"
+    local _kind _sec _first=1 _title
+    while IFS='|' read -r _kind _sec; do
+        [ -n "$_sec" ] || continue
+        _title="$(link_kind_title "$_kind")"
+        echo -e "  ${BOLD}Ссылка для Telegram${NC} ${DIM}(${_title})${NC}"
+        echo -e "  ${CYAN}tg://proxy?server=${_ip}&port=${_port}&secret=${_sec}${NC}"
+        echo -e "  ${BOLD}Веб-ссылка${NC} ${DIM}(${_title})${NC}"
+        echo -e "  ${CYAN}https://t.me/proxy?server=${_ip}&port=${_port}&secret=${_sec}${NC}"
+        if [ "$_qr" = "true" ] && [ $_first -eq 1 ] && command -v qrencode &>/dev/null; then
+            echo ""
+            qrencode -t ANSIUTF8 "tg://proxy?server=${_ip}&port=${_port}&secret=${_sec}" 2>/dev/null | sed 's/^/  /'
+        fi
+        _first=0
         echo ""
-        qrencode -t ANSIUTF8 "tg://proxy?server=${server_ip}&port=${server_port}&secret=${full_secret}" 2>/dev/null | sed 's/^/  /'
-    fi
-    echo ""
+    done <<< "$(build_link_secrets "$_raw")"
 }
 
 # Удалить секрет
@@ -136,20 +237,20 @@ secret_remove() {
         [ "$confirm" != "yes" ] && { log_info "Отменено"; return 0; }
     fi
 
-    local -a nl=() nk=() nc=() ne=() nmc=() nmi=() nq=() nex=() nn=()
+    local -a nl=() nk=() nc=() ne=() nmc=() nmi=() nq=() nex=() nn=() nat=()
     for i in "${!SECRETS_LABELS[@]}"; do
         [ "$i" -eq "$idx" ] && continue
         nl+=("${SECRETS_LABELS[$i]}"); nk+=("${SECRETS_KEYS[$i]}")
         nc+=("${SECRETS_CREATED[$i]}"); ne+=("${SECRETS_ENABLED[$i]}")
         nmc+=("${SECRETS_MAX_CONNS[$i]:-0}"); nmi+=("${SECRETS_MAX_IPS[$i]:-0}")
         nq+=("${SECRETS_QUOTA[$i]:-0}"); nex+=("${SECRETS_EXPIRES[$i]:-0}")
-        nn+=("${SECRETS_NOTES[$i]:-}")
+        nn+=("${SECRETS_NOTES[$i]:-}"); nat+=("${SECRETS_ADTAG[$i]:-}")
     done
     SECRETS_LABELS=("${nl[@]}"); SECRETS_KEYS=("${nk[@]}")
     SECRETS_CREATED=("${nc[@]}"); SECRETS_ENABLED=("${ne[@]}")
     SECRETS_MAX_CONNS=("${nmc[@]}"); SECRETS_MAX_IPS=("${nmi[@]}")
     SECRETS_QUOTA=("${nq[@]}"); SECRETS_EXPIRES=("${nex[@]}")
-    SECRETS_NOTES=("${nn[@]}")
+    SECRETS_NOTES=("${nn[@]}"); SECRETS_ADTAG=("${nat[@]}")
 
     save_secrets
     [ "$no_restart" != "true" ] && reload_proxy_config 2>/dev/null || true
@@ -173,16 +274,13 @@ secret_rotate() {
     save_secrets
     reload_proxy_config 2>/dev/null || true
 
-    local full_secret server_ip server_port
-    full_secret=$(build_faketls_secret "$new_secret")
+    local server_ip server_port
     server_ip=$(proxy_link_host)
     server_port=$(proxy_link_port)
 
     log_success "Секрет '${label}' обновлён"
     echo ""
-    echo -e "  ${BOLD}Новая ссылка:${NC}"
-    echo -e "  ${CYAN}tg://proxy?server=${server_ip}&port=${server_port}&secret=${full_secret}${NC}"
-    echo ""
+    _print_secret_links "$server_ip" "$server_port" "$new_secret"
 }
 
 # Включить/выключить секрет
@@ -278,6 +376,39 @@ secret_set_limits() {
     save_secrets
     reload_proxy_config 2>/dev/null || true
     log_success "Лимиты обновлены для '${label}'"
+}
+
+# Рекламная метка отдельного пользователя — секция [access.user_ad_tags]
+# у движка. Общая метка в [general] от этого не отменяется: она остаётся для
+# всех, у кого своей нет.
+secret_set_adtag() {
+    local label="$1" tag="${2:-}"
+    local idx=-1 i
+    for i in "${!SECRETS_LABELS[@]}"; do
+        [ "${SECRETS_LABELS[$i]}" = "$label" ] && { idx=$i; break; }
+    done
+    [ $idx -eq -1 ] && { log_error "Секрет '${label}' не найден"; return 1; }
+
+    case "$tag" in
+        remove|none|"-"|"0")
+            SECRETS_ADTAG[$idx]=""
+            save_secrets
+            reload_proxy_config 2>/dev/null || true
+            log_success "Метка снята с '${label}'"
+            return 0 ;;
+    esac
+    if [ -z "$tag" ]; then
+        echo "${SECRETS_ADTAG[$idx]:-}"
+        return 0
+    fi
+    if ! [[ "$tag" =~ ^[0-9a-fA-F]{32}$ ]]; then
+        log_error "Метка: ровно 32 hex-символа (её выдаёт @MTProxybot)"
+        return 1
+    fi
+    SECRETS_ADTAG[$idx]="$tag"
+    save_secrets
+    reload_proxy_config 2>/dev/null || true
+    log_success "Метка задана для '${label}'"
 }
 
 # Список секретов
@@ -444,7 +575,7 @@ secret_list_json() {
         json_escape_fast "${SECRETS_NOTES[$_i]:-}";        _notes_esc="$_JSON_ESCAPE_OUT"
         if [ "${SECRETS_ENABLED[$_i]}" = "true" ]; then _enabled_str=true; else _enabled_str=false; fi
 
-        printf '{"label":"%s","secret":"%s","created":%s,"enabled":%s,"max_conns":%s,"max_ips":%s,"quota_bytes":%s,"expires":"%s","notes":"%s","total_in":%s,"total_out":%s,"total_bytes":%s,"ip_history":[%s]}' \
+        printf '{"label":"%s","secret":"%s","created":%s,"enabled":%s,"max_conns":%s,"max_ips":%s,"quota_bytes":%s,"expires":"%s","notes":"%s","ad_tag":"%s","total_in":%s,"total_out":%s,"total_bytes":%s,"ip_history":[%s]}' \
             "$_label_esc" \
             "$_secret_esc" \
             "${SECRETS_CREATED[$_i]:-0}" \
@@ -454,6 +585,7 @@ secret_list_json() {
             "${SECRETS_QUOTA[$_i]:-0}" \
             "$_expires_esc" \
             "$_notes_esc" \
+            "${SECRETS_ADTAG[$_i]:-}" \
             "${_uin:-0}" "${_uout:-0}" "$(( ${_uin:-0} + ${_uout:-0} ))" \
             "${_IP_HIST_JSON[$_label]:-}"
     done
@@ -504,8 +636,9 @@ secret_list() {
     done
     echo ""
 }
-# Ссылка для секрета
-get_proxy_link() {
+# Все рабочие ссылки секрета — по одной в строке. С выключенной маскировкой
+# движок принимает и dd, и ee, и обе ссылки настоящие.
+get_proxy_links() {
     local label="${1:-}"
     local server_ip server_port
     server_ip=$(proxy_link_host)
@@ -525,9 +658,19 @@ get_proxy_link() {
     done
     [ $idx -eq -1 ] && { log_error "Секрет '${label}' не найден"; return 1; }
 
-    local full_secret
-    full_secret=$(build_faketls_secret "${SECRETS_KEYS[$idx]}")
-    echo "tg://proxy?server=${server_ip}&port=${server_port}&secret=${full_secret}"
+    local _kind _sec
+    while IFS='|' read -r _kind _sec; do
+        [ -n "$_sec" ] || continue
+        echo "tg://proxy?server=${server_ip}&port=${server_port}&secret=${_sec}"
+    done <<< "$(build_link_secrets "${SECRETS_KEYS[$idx]}")"
+}
+
+# Одна ссылка — первая из списка. Её ждут те, кто читает вывод строкой:
+# QR-код и телеграм-бот.
+get_proxy_link() {
+    local _links
+    _links=$(get_proxy_links "${1:-}") || return 1
+    printf '%s\n' "$_links" | head -1
 }
 
 # Получить список меток включённых секретов для конфига
@@ -566,17 +709,16 @@ secret_clone() {
     SECRETS_QUOTA+=("${SECRETS_QUOTA[$idx]:-0}")
     SECRETS_EXPIRES+=("${SECRETS_EXPIRES[$idx]:-0}")
     SECRETS_NOTES+=("${SECRETS_NOTES[$idx]:-}")
+    SECRETS_ADTAG+=("${SECRETS_ADTAG[$idx]:-}")
 
     save_secrets
     reload_proxy_config 2>/dev/null || true
 
-    local full_secret server_ip server_port
-    full_secret=$(build_faketls_secret "${SECRETS_KEYS[-1]}")
+    local server_ip server_port
     server_ip=$(proxy_link_host)
     server_port=$(proxy_link_port)
     log_success "Секрет '${new}' клонирован из '${src}'"
-    echo -e "  ${CYAN}tg://proxy?server=${server_ip}&port=${server_port}&secret=${full_secret}${NC}"
-    echo ""
+    _print_secret_links "$server_ip" "$server_port" "${SECRETS_KEYS[-1]}"
 }
 
 # Переименование
@@ -640,7 +782,7 @@ _TARGET_USER_MARK='#mtproxyl-off '
 
 # Секции цели, где пользователь упоминается по метке. Порядок важен только для
 # вывода — удаляем и переименовываем во всех.
-_TARGET_LIMIT_SECTIONS='access.user_max_tcp_conns access.user_max_unique_ips access.user_data_quota access.user_expirations'
+_TARGET_LIMIT_SECTIONS='access.user_max_tcp_conns access.user_max_unique_ips access.user_data_quota access.user_expirations access.user_ad_tags'
 
 _target_users_ready() {
     if [ -z "${DETECTED_CONFIG_PATH:-}" ] || [ ! -f "$DETECTED_CONFIG_PATH" ]; then
@@ -778,6 +920,15 @@ _target_user_state() {
     printf '%s' "$_row"
 }
 
+# Ссылок у пользователя может быть несколько (dd и ee сразу) — печатаем
+# каждую своей строкой, иначе вторая уезжает без отступа и цвета.
+_echo_links() {
+    local _l
+    while IFS= read -r _l; do
+        [ -n "$_l" ] && echo -e "  ${CYAN}${_l}${NC}"
+    done <<< "$1"
+}
+
 _target_user_secret() {
     _target_section_pairs "access.users" | awk -F'|' -v l="$1" '$2 == l { print $3; exit }'
 }
@@ -786,10 +937,25 @@ _target_user_limit() {
     _target_section_pairs "$2" | awk -F'|' -v l="$1" '$2 == l { print $3; exit }'
 }
 
-# Ссылка строится по конфигу цели, а не по нашим настройкам: домен и режим
-# маскировки у чужого движка свои.
+# Ссылки строятся по конфигу цели, а не по нашим настройкам: домен и режим
+# маскировки у чужого движка свои. Может вернуть несколько строк — по одной
+# на каждый включённый вид ссылки.
 target_user_link() {
     local _label="$1" _raw _domain _mask _full _ip _port
+
+    # Если API цели отвечает — ссылки уже собраны самим движком, включая dd и
+    # ee сразу. Свои строить незачем: у него правда о включённых режимах.
+    local _json _u _l _from_api=""
+    if _json=$(_get_telemt_users_json 2>/dev/null); then
+        while IFS='|' read -r _u _l; do
+            [ "$_u" = "$_label" ] && [ -n "$_l" ] && _from_api+="${_l}"$'\n'
+        done <<< "$(_target_links_ipv4 "$_json")"
+    fi
+    if [ -n "$_from_api" ]; then
+        printf '%s' "$_from_api"
+        return 0
+    fi
+
     _raw=$(_target_user_secret "$_label")
     [ -n "$_raw" ] || return 1
     _domain=$(_toml_get_string_in_section "censorship" "tls_domain" "$DETECTED_CONFIG_PATH")
@@ -809,10 +975,106 @@ target_user_link() {
     printf 'tg://proxy?server=%s&port=%s&secret=%s' "$_ip" "$_port" "$_full"
 }
 
-# Общий хвост всех правок: цель читает конфиг только при старте.
+# Успела ли цель подхватить правку сама. telemt следит за файлом конфига и
+# применяет пользователей на ходу — сигнала ему для этого не нужно. Сверяем
+# состав включённых в конфиге с тем, что отдаёт API: сошлось — перезапускать
+# нечего. Не сошлось (другой движок, старая версия, API молчит) — вызывающий
+# уходит на прежнюю ветку с перезапуском, то есть хуже не станет.
+_target_users_hot_applied() {
+    local _want _have _try
+    _want=$(_target_config_user_limits 2>/dev/null)
+    [ -n "$_want" ] || return 1
+    for _try in 1 2 3 4 5 6; do
+        _have=$(_target_api_user_limits 2>/dev/null)
+        [ -n "$_have" ] && [ "$_want" = "$_have" ] && return 0
+        sleep 0.5
+    done
+    return 1
+}
+
+# «Имя|соединения|адреса|квота|срок» по включённым пользователям конфига.
+# Пустое поле — ограничения нет: движок понимает это как отсутствие строки.
+_target_config_user_limits() {
+    declare -A _CONN=() _UIPS=() _QUOTA=() _EXP=()
+    local _st _lb _v
+    while IFS='|' read -r _st _lb _v; do
+        [ -n "$_lb" ] && _CONN["$_lb"]="$_v"
+    done < <(_target_section_pairs "access.user_max_tcp_conns" 2>/dev/null)
+    while IFS='|' read -r _st _lb _v; do
+        [ -n "$_lb" ] && _UIPS["$_lb"]="$_v"
+    done < <(_target_section_pairs "access.user_max_unique_ips" 2>/dev/null)
+    while IFS='|' read -r _st _lb _v; do
+        [ -n "$_lb" ] && _QUOTA["$_lb"]="$_v"
+    done < <(_target_section_pairs "access.user_data_quota" 2>/dev/null)
+    while IFS='|' read -r _st _lb _v; do
+        [ -n "$_lb" ] && _EXP["$_lb"]="$_v"
+    done < <(_target_section_pairs "access.user_expirations" 2>/dev/null)
+    declare -A _ADT=()
+    while IFS='|' read -r _st _lb _v; do
+        [ -n "$_lb" ] && _ADT["$_lb"]="$_v"
+    done < <(_target_section_pairs "access.user_ad_tags" 2>/dev/null)
+
+    while IFS='|' read -r _st _lb _v; do
+        [ "$_st" = "on" ] || continue
+        [ -n "$_lb" ] || continue
+        printf '%s|%s|%s|%s|%s|%s\n' "$_lb" \
+            "${_CONN[$_lb]:-}" "${_UIPS[$_lb]:-}" "${_QUOTA[$_lb]:-}" "${_EXP[$_lb]:-}" \
+            "${_ADT[$_lb]:-}"
+    done < <(_target_section_pairs "access.users" 2>/dev/null) | LC_ALL=C sort
+}
+
+# То же самое, но так, как это видит сам движок — из его API.
+_target_api_user_limits() {
+    local _json
+    _json=$(_get_telemt_users_json 2>/dev/null) || return 1
+    printf '%s' "$_json" | tr -d '\n' | awk '
+        function first_string(s,   p, q) {
+            p = index(s, "\""); if (!p) return ""
+            s = substr(s, p + 1); q = index(s, "\"")
+            return q ? substr(s, 1, q - 1) : ""
+        }
+        function raw_after(s, k,   p) {
+            p = index(s, "\"" k "\""); if (!p) return ""
+            s = substr(s, p + length(k) + 2)
+            p = index(s, ":"); if (!p) return ""
+            s = substr(s, p + 1); sub(/^[ \t]+/, "", s)
+            return s
+        }
+        function num(s, k,   v) {
+            v = raw_after(s, k)
+            if (match(v, /^[0-9]+/)) return substr(v, RSTART, RLENGTH)
+            return ""
+        }
+        function str(s, k,   v, q) {
+            v = raw_after(s, k)
+            if (substr(v, 1, 1) != "\"") return ""
+            v = substr(v, 2); q = index(v, "\"")
+            return q ? substr(v, 1, q - 1) : ""
+        }
+        BEGIN { RS = "\"username\"" }
+        NR == 1 { next }
+        {
+            u = first_string($0); if (u == "") next
+            e = str($0, "expiration_rfc3339")
+            # Движок отдаёт смещение, в конфиге стоит Z — это один момент
+            # времени, и расходиться из-за записи они не должны.
+            sub(/\+00:00$/, "Z", e)
+            printf "%s|%s|%s|%s|%s|%s\n", u, num($0, "max_tcp_conns"), \
+                num($0, "max_unique_ips"), num($0, "data_quota_bytes"), e, \
+                str($0, "user_ad_tag")
+        }
+    ' | LC_ALL=C sort
+}
+
+# Общий хвост всех правок: у движка, который читает конфиг только при старте,
+# без перезапуска ничего не изменится.
 _target_users_apply() {
     if ! is_proxy_running; then
         log_info "Цель не запущена — изменения применятся при её запуске"
+        return 0
+    fi
+    if _target_users_hot_applied; then
+        log_success "Цель применила изменения на ходу — перезапуск не нужен"
         return 0
     fi
     echo -en "  ${BOLD}Перезапустить цель, чтобы применить? [Y/n]:${NC} "
@@ -854,8 +1116,8 @@ target_user_add() {
     local _link; _link=$(target_user_link "$_label")
     if [ -n "$_link" ]; then
         echo ""
-        echo -e "  ${BOLD}Ссылка для Telegram:${NC}"
-        echo -e "  ${CYAN}${_link}${NC}"
+        echo -e "  ${BOLD}Ссылки для Telegram:${NC}"
+        _echo_links "$_link"
         echo ""
     fi
     _target_users_apply
@@ -908,7 +1170,7 @@ target_user_rotate() {
     fi
     log_success "Ключ пользователя '${_label}' обновлён — старый перестанет работать"
     local _link; _link=$(target_user_link "$_label")
-    [ -n "$_link" ] && { echo ""; echo -e "  ${CYAN}${_link}${NC}"; echo ""; }
+    [ -n "$_link" ] && { echo ""; _echo_links "$_link"; echo ""; }
     _target_users_apply
 }
 
@@ -956,7 +1218,7 @@ target_user_rename() {
         [ -n "$_val" ] || continue
         _toml_safe_unset "$_from" "$_sect" "$DETECTED_CONFIG_PATH" || true
         case "$_sect" in
-            access.user_expirations) _target_set_in_section "$_to" "\"${_val}\"" "$_sect" ;;
+            access.user_expirations|access.user_ad_tags) _target_set_in_section "$_to" "\"${_val}\"" "$_sect" ;;
             *)                       _target_set_in_section "$_to" "$_val" "$_sect" ;;
         esac
     done
@@ -1001,6 +1263,33 @@ _target_users_set_limit() {
     fi
 }
 
+# Рекламная метка пользователя цели — та же секция, что и у менеджера.
+target_user_adtag() {
+    local _label="$1" _tag="${2:-}"
+    _target_users_ready || return 1
+    [ -n "$(_target_user_state "$_label")" ] || {
+        log_error "Пользователь '${_label}' не найден у цели"; return 1; }
+
+    if [ -z "$_tag" ]; then
+        _target_user_limit "$_label" "access.user_ad_tags"
+        return 0
+    fi
+    backup_target_config "users" "true" || true
+    case "$_tag" in
+        remove|none|"-"|"0")
+            _target_users_set_limit "$_label" "access.user_ad_tags" "" str
+            log_success "Метка снята с '${_label}'" ;;
+        *)
+            if ! [[ "$_tag" =~ ^[0-9a-fA-F]{32}$ ]]; then
+                log_error "Метка: ровно 32 hex-символа (её выдаёт @MTProxybot)"
+                return 1
+            fi
+            _target_users_set_limit "$_label" "access.user_ad_tags" "$_tag" str
+            log_success "Метка задана для '${_label}'" ;;
+    esac
+    _target_users_apply
+}
+
 target_users_list_json() {
     _target_users_ready || { printf '[]\n'; return 1; }
     local _json
@@ -1015,7 +1304,7 @@ target_users_list_json() {
     local _TDB_SRC=""
     _load_target_db
 
-    declare -A _LIM_CONNS=() _LIM_IPS=() _LIM_QUOTA=() _LIM_EXPIRES=()
+    declare -A _LIM_CONNS=() _LIM_IPS=() _LIM_QUOTA=() _LIM_EXPIRES=() _LIM_ADTAG=()
     local _st _nm _vl
     while IFS='|' read -r _st _nm _vl; do
         [ -n "$_nm" ] && _LIM_CONNS["$_nm"]="$_vl"
@@ -1029,6 +1318,9 @@ target_users_list_json() {
     while IFS='|' read -r _st _nm _vl; do
         [ -n "$_nm" ] && _LIM_EXPIRES["$_nm"]="$_vl"
     done < <(_target_section_pairs "access.user_expirations")
+    while IFS='|' read -r _st _nm _vl; do
+        [ -n "$_nm" ] && _LIM_ADTAG["$_nm"]="$_vl"
+    done < <(_target_section_pairs "access.user_ad_tags")
 
     declare -A _IP_HIST=()
     if [ -f "$_TARGET_USER_IPS_DB" ]; then
@@ -1059,15 +1351,17 @@ target_users_list_json() {
         _ips="${_LIM_IPS[$_label]:-0}";      [[ "$_ips" =~ ^[0-9]+$ ]]    || _ips=0
         _quota="${_LIM_QUOTA[$_label]:-0}";  [[ "$_quota" =~ ^[0-9]+$ ]]  || _quota=0
         _expires="${_LIM_EXPIRES[$_label]:-}"
+        local _adtag="${_LIM_ADTAG[$_label]:-}"
+        [[ "$_adtag" =~ ^[0-9a-fA-F]{32}$ ]] || _adtag=""
 
         json_escape_fast "$_label";    _label_esc="$_JSON_ESCAPE_OUT"
         json_escape_fast "$_secret";   _secret_esc="$_JSON_ESCAPE_OUT"
         json_escape_fast "$_expires";  _expires_esc="$_JSON_ESCAPE_OUT"
         if [ "$_state" = "on" ]; then _enabled_str=true; else _enabled_str=false; fi
 
-        printf '{"label":"%s","secret":"%s","created":0,"enabled":%s,"max_conns":%s,"max_ips":%s,"quota_bytes":%s,"expires":"%s","notes":"","total_in":%s,"total_out":%s,"total_bytes":%s,"ip_history":[%s]}' \
+        printf '{"label":"%s","secret":"%s","created":0,"enabled":%s,"max_conns":%s,"max_ips":%s,"quota_bytes":%s,"expires":"%s","notes":"","ad_tag":"%s","total_in":%s,"total_out":%s,"total_bytes":%s,"ip_history":[%s]}' \
             "$_label_esc" "$_secret_esc" "$_enabled_str" \
-            "$_conns" "$_ips" "$_quota" "$_expires_esc" \
+            "$_conns" "$_ips" "$_quota" "$_expires_esc" "$_adtag" \
             "${_TDB_IN[$_label]:-0}" "${_TDB_OUT[$_label]:-0}" "${_TDB_TOTAL[$_label]:-0}" \
             "${_IP_HIST[$_label]:-}"
     done < <(_target_section_pairs "access.users")
@@ -1132,19 +1426,24 @@ handle_target_user_command() {
             local _l="$1"; shift 2>/dev/null || true
             target_user_setlimits "$_l" "${1:-0}" "${2:-0}" "${3:-0}" "${4:-}" ;;
         limits)   target_user_show_limits "${1:-}" ;;
+        adtag)    check_root; target_user_adtag "${1:-}" "${2:-}" ;;
         link)
-            local _link; _link=$(target_user_link "${1:-}") || {
+            local _links; _links=$(target_user_link "${1:-}") || {
                 log_error "Пользователь '${1:-}' не найден у цели"; return 1; }
-            echo -e "  ${CYAN}${_link}${NC}"; echo "" ;;
+            _echo_links "$_links"
+            echo "" ;;
         qr)
-            local _link; _link=$(target_user_link "${1:-}") || {
+            local _links; _links=$(target_user_link "${1:-}") || {
                 log_error "Пользователь '${1:-}' не найден у цели"; return 1; }
+            # QR — на первую ссылку: их у пользователя может быть несколько.
+            local _link; _link=$(printf '%s\n' "$_links" | head -1)
             if command -v qrencode &>/dev/null; then
                 echo ""; qrencode -t ANSIUTF8 "$_link" | sed 's/^/  /'
             else
                 echo -e "  ${DIM}qrencode не установлен: apt install qrencode${NC}"
             fi
-            echo -e "  ${CYAN}${_link}${NC}"; echo "" ;;
+            _echo_links "$_links"
+            echo "" ;;
         clone)
             log_error "Клонирование недоступно в реаниматоре"
             log_info "Лимиты цели заданы её администратором — добавьте пользователя и задайте лимиты явно"
@@ -1162,6 +1461,8 @@ handle_target_user_command() {
             echo -e "    ${GREEN}secret rename${NC} <из> <в>     Переименовать"
             echo -e "    ${GREEN}secret limits${NC} [метка]      Лимиты"
             echo -e "    ${GREEN}secret setlimits${NC} <метка> <соед> <ip> <квота> [срок]"
+            echo -e "    ${GREEN}secret adtag${NC} <метка> <32hex|remove>"
+            echo -e "                              Рекламная метка пользователя"
             echo -e "    ${GREEN}secret link${NC} <метка>        Ссылка"
             echo -e "    ${GREEN}secret qr${NC} <метка>          QR-код"
             ;;
@@ -1215,21 +1516,25 @@ handle_secret_command() {
         enable)   check_root; secret_toggle "$1" enable ;;
         disable)  check_root; secret_toggle "$1" disable ;;
         limits)   secret_show_limits "$1" ;;
+        adtag)    check_root; secret_set_adtag "$1" "${2:-}" ;;
         setlimits)
             check_root
             local l="$1"; shift 2>/dev/null || true
             secret_set_limits "$l" "${1:-0}" "${2:-0}" "${3:-0}" "${4:-}" ;;
-        link)     get_proxy_link "${1:-}"; echo "" ;;
+        link)     get_proxy_links "${1:-}"; echo "" ;;
         clone)    check_root; secret_clone "$1" "$2" ;;
         rename)   check_root; secret_rename "$1" "$2" ;;
         qr)
-            local link; link=$(get_proxy_link "${1:-}") || return 1
+            local links; links=$(get_proxy_links "${1:-}") || return 1
+            local link; link=$(printf '%s\n' "$links" | head -1)
             if command -v qrencode &>/dev/null; then
                 echo ""; qrencode -t ANSIUTF8 "$link" | sed 's/^/  /'
             else
                 echo -e "  ${DIM}qrencode не установлен: apt install qrencode${NC}"
             fi
-            echo -e "  ${CYAN}${link}${NC}"; echo "" ;;
+            # QR один — на первую ссылку, но остальные виды тоже рабочие.
+            _echo_links "$links"
+            echo "" ;;
         *)
             echo -e "  ${BOLD}Управление секретами:${NC}"
             echo -e "    ${GREEN}secret add${NC} <метка>        Добавить"

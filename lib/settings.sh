@@ -28,6 +28,12 @@ UNKNOWN_SNI_ACTION="mask"
 PROXY_SECRET_URL=""
 PROXY_CONFIG_V4_URL=""
 PROXY_CONFIG_V6_URL=""
+# Только оптимизация: telemt на сервере нет и не нужен, работаем как набор
+# host-фиксов (zapret2, лимитер, By-MEKO, гео). Всё, что требует движка,
+# из меню уходит — включая жалобы на его отсутствие.
+TOOLS_ONLY="false"
+# Порог покрытия дата-центров Telegram, ниже которого бот шлёт уведомление.
+DC_THRESHOLD="80"
 IP_HISTORY_LIMIT="200"
 # Как часто снимать адреса в историю, минут. 0 — только при открытой панели.
 IP_HISTORY_INTERVAL="5"
@@ -47,6 +53,22 @@ AVAILABILITY_SNI=""
 # (сторож). Включённым может быть только один — два бота в одном чате
 # означали бы два опросчика на один токен и путаницу в том, кто чем управляет.
 TGBOT_VARIANT="none"
+# Маршрут до Telegram через Cloudflare WARP (warpscout). В туннель уходят
+# только подсети Telegram; клиенты приходят на сервер по-прежнему напрямую.
+WARP_ENABLED="false"
+# socks — вариант A (SOCKS5 warpscout + redsocks), iface — вариант B
+# (интерфейс WireGuard и policy routing).
+WARP_MODE="socks"
+WARP_PROTO="awg"
+# Пусто — лучший по задержке; иначе коды стран (DE,NL) или узлов (FRA,AMS).
+WARP_LOCATION=""
+WARP_ENDPOINT=""
+WARP_SOCKS_PORT="41080"
+WARP_REDIR_PORT="41081"
+WARP_MTU="1280"
+WARP_FWMARK="0x100000"
+# Маршруты движка, выключенные на время работы варианта C — вернём при выключении.
+WARP_DISABLED_UPSTREAMS=""
 
 # Режим супер эксперта: конфиг движка ведёт пользователь вручную,
 # менеджер только копирует его файл на место config.toml
@@ -138,6 +160,8 @@ PROXY_CONFIG_V6_URL='${PROXY_CONFIG_V6_URL}'
 # Автообновление
 
 # Автоматическая ротация секретов
+TOOLS_ONLY='${TOOLS_ONLY}'
+DC_THRESHOLD='${DC_THRESHOLD}'
 IP_HISTORY_LIMIT='${IP_HISTORY_LIMIT}'
 IP_HISTORY_INTERVAL='${IP_HISTORY_INTERVAL}'
 BACKUP_RETENTION_DAYS='${BACKUP_RETENTION_DAYS}'
@@ -153,6 +177,17 @@ AVAILABILITY_SNI='${AVAILABILITY_SNI}'
 
 # Выбранный телеграм-бот
 TGBOT_VARIANT='${TGBOT_VARIANT}'
+# Маршрут до Telegram через WARP
+WARP_ENABLED='${WARP_ENABLED}'
+WARP_MODE='${WARP_MODE}'
+WARP_PROTO='${WARP_PROTO}'
+WARP_LOCATION='${WARP_LOCATION}'
+WARP_ENDPOINT='${WARP_ENDPOINT}'
+WARP_SOCKS_PORT='${WARP_SOCKS_PORT}'
+WARP_REDIR_PORT='${WARP_REDIR_PORT}'
+WARP_MTU='${WARP_MTU}'
+WARP_FWMARK='${WARP_FWMARK}'
+WARP_DISABLED_UPSTREAMS='${WARP_DISABLED_UPSTREAMS}'
 
 # Selfmask
 SELFMASK_ENABLED='${SELFMASK_ENABLED}'
@@ -346,10 +381,13 @@ load_settings() {
                 MASKING_ENABLED|MASKING_HOST|MASKING_PORT|MASKING_RELAY_MAX_BYTES|\
                 UNKNOWN_SNI_ACTION|\
                 PROXY_SECRET_URL|PROXY_CONFIG_V4_URL|PROXY_CONFIG_V6_URL|\
-                BACKUP_RETENTION_DAYS|IP_HISTORY_LIMIT|IP_HISTORY_INTERVAL|\
+                BACKUP_RETENTION_DAYS|IP_HISTORY_LIMIT|IP_HISTORY_INTERVAL|TOOLS_ONLY|DC_THRESHOLD|\
                 AVAILABILITY_ENABLED|AVAILABILITY_INTERVAL|AVAILABILITY_PROBES|\
                 AVAILABILITY_THRESHOLD|AVAILABILITY_HOST|AVAILABILITY_PORT|AVAILABILITY_SNI|\
                 TGBOT_VARIANT|\
+                WARP_ENABLED|WARP_MODE|WARP_PROTO|WARP_LOCATION|WARP_ENDPOINT|\
+                WARP_SOCKS_PORT|WARP_REDIR_PORT|WARP_MTU|WARP_FWMARK|\
+                WARP_DISABLED_UPSTREAMS|\
                 SELFMASK_ENABLED|SELFMASK_DOMAIN|SELFMASK_SITE_SOURCE|SELFMASK_SITE_DIR|\
                 SELFMASK_NGINX_BACKEND_PORT|SELFMASK_CERT_EMAIL|SELFMASK_NGINX_SITE_NAME|\
                 SELFMASK_AUTO_RENEW|SELFMASK_TLS_PROTOCOLS|SELFMASK_CERT_MODE|\

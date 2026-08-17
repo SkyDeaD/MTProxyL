@@ -16,6 +16,7 @@ from .cli import CliError
 from .format import (
     HELP_TEXT,
     availability_text,
+    dc_text,
     esc,
     settings_text,
     status_text,
@@ -318,7 +319,8 @@ async def set_threshold(message: Message, state: FSMContext) -> None:
 
 # ── Бэкапы (только режим менеджера) ──────────────────────────────────────────
 
-async def show_backups(event: Message | CallbackQuery, note: str = "") -> None:
+async def show_backups(event: Message | CallbackQuery, note: str = "",
+                       force_new: bool = False) -> None:
     if not await cli.is_manager():
         await render(event, "Бэкапы доступны только в режиме Manager: в реаниматоре "
                             "данные принадлежат чужой установке.", kb.back_only())
@@ -334,7 +336,7 @@ async def show_backups(event: Message | CallbackQuery, note: str = "") -> None:
         last, count = "", ""
     head = f"{note}\n\n" if note else ""
     await render(event, f"{head}<b>Бэкапы</b>\n\nАвтобэкап: <b>{state}</b>{count}{last}",
-                 kb.backups_menu())
+                 kb.backups_menu(), force_new=force_new)
 
 
 @router.callback_query(F.data == "b:show")
@@ -377,7 +379,33 @@ async def do_backup(event: Message | CallbackQuery) -> None:
         BufferedInputFile(data, filename=name),
         caption=f"💾 Бэкап <code>{esc(name)}</code>",
     )
-    await show_backups(event, "✅ Архив отправлен")
+    # force_new: архив ушёл в чат последним сообщением, и правка меню на месте
+    # оставила бы его над файлом. Меню должно быть внизу — пересоздаём.
+    await show_backups(event, "✅ Архив отправлен", force_new=True)
+
+
+# ── Дата-центры Telegram ─────────────────────────────────────────────────────
+
+async def show_dc(event: Message | CallbackQuery, note: str = "") -> None:
+    try:
+        report = await cli.dc_status()
+    except Exception as exc:
+        await report_error(event, exc)
+        return
+    head = f"{note}\n\n" if note else ""
+    await render(event, head + dc_text(report), kb.back_only())
+
+
+@router.message(Command("dc"))
+async def cmd_dc(message: Message) -> None:
+    await show_dc(message)
+
+
+@router.callback_query(F.data == "dc:show")
+async def cb_dc(call: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    await ack(call)
+    await show_dc(call)
 
 
 @router.message(Command("backup"))

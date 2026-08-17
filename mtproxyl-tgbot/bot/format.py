@@ -5,7 +5,7 @@ from __future__ import annotations
 import html
 from datetime import datetime, timezone
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 LEVEL_ICON = {"green": "🟢", "yellow": "🟡", "red": "🔴"}
 
@@ -68,7 +68,16 @@ def status_text(st: dict, md: dict) -> str:
     if running:
         lines.append(f"Аптайм: {human_duration(st.get('uptime'))}")
     lines.append(f"Соединений: {esc(st.get('connections', 0))}")
-    lines.append(f"Трафик: {human_bytes(st.get('traffic_total'))}")
+    lines.append(f"Уникальных IP: {esc(st.get('unique_ips', 0))}")
+    # traffic_total есть в обоих режимах; in/out — только у менеджера, у цели
+    # API направления не разделяет.
+    traffic = f"Трафик: {human_bytes(st.get('traffic_total'))}"
+    if st.get("traffic_in") is not None or st.get("traffic_out") is not None:
+        traffic += (
+            f" (↓ {human_bytes(st.get('traffic_in'))}"
+            f" ↑ {human_bytes(st.get('traffic_out'))})"
+        )
+    lines.append(traffic)
     if md.get("mode") == "reanimator":
         lines.append(f"Цель: <code>{esc(md.get('detected_mode') or 'неизвестна')}</code>")
     return "\n".join(lines)
@@ -156,14 +165,31 @@ def user_card(user: dict) -> str:
     return "\n".join(lines)
 
 
-def link_text(label: str, tg_link: str) -> str:
-    """Ссылка кнопкой и она же текстом — второе для копирования вручную."""
-    web = web_link(tg_link)
-    return (
-        f"<b>{esc(label)}</b>\n\n"
-        f'👉 <b><a href="{esc(tg_link)}">Подключиться</a></b>\n\n'
-        f"<code>{esc(web)}</code>"
-    )
+def link_text(label: str, tg_links: str | list[str]) -> str:
+    """Ссылка кнопкой и она же текстом — второе для копирования вручную.
+    Ссылок может быть несколько: с выключенной маскировкой движок принимает и
+    dd, и ee. Первая — основная, остальные идут следом подписанными."""
+    links = [tg_links] if isinstance(tg_links, str) else list(tg_links)
+    parts = [
+        f"<b>{esc(label)}</b>",
+        "",
+        f'👉 <b><a href="{esc(links[0])}">Подключиться</a></b>',
+        "",
+        f"<code>{esc(web_link(links[0]))}</code>",
+    ]
+    for extra in links[1:]:
+        parts += ["", f"<i>{esc(_link_kind(extra))}</i>", f"<code>{esc(web_link(extra))}</code>"]
+    return "\n".join(parts)
+
+
+def _link_kind(tg_link: str) -> str:
+    """Вид ссылки виден по началу секрета: ee — TLS-маскировка, dd — secure."""
+    secret = parse_qs(urlsplit(tg_link).query).get("secret", [""])[0]
+    if secret.startswith("ee"):
+        return "ещё одна ссылка (ee · TLS)"
+    if secret.startswith("dd"):
+        return "ещё одна ссылка (dd · secure)"
+    return "ещё одна ссылка"
 
 
 def web_link(tg_link: str) -> str:
@@ -313,6 +339,7 @@ HELP_TEXT = """<b>MTProxyL — команды</b>
 /link — ссылка и QR-код
 /traffic — трафик по пользователям
 /availability — доступность из России
+/dc — дата-центры Telegram: RTT, писатели, покрытие
 /check — проверить доступность прямо сейчас
 /start_proxy, /stop_proxy, /restart_proxy — управление прокси
 /backup — сделать бэкап и прислать сюда (только Manager)
@@ -320,3 +347,35 @@ HELP_TEXT = """<b>MTProxyL — команды</b>
 /help — эта справка
 
 Всё то же самое есть кнопками — /menu."""
+
+
+def dc_text(report: dict) -> str:
+    """Таблица дата-центров: RTT, писатели, покрытие."""
+    if not report.get("available"):
+        why = report.get("error") or "данных нет"
+        return f"<b>Дата-центры Telegram</b>\n\n{esc(why)}"
+    rows = report.get("dcs") or []
+    threshold = int(report.get("threshold") or 0)
+    table = _table(
+        [("", 1, False), ("DC", 6, False), ("RTT", 6, True), ("Писат.", 7, True), ("Покр.", 5, True)],
+        [
+            [
+                "✅" if d.get("ok") else "⚠️",
+                str(d.get("dc")),
+                f"{int(d.get('rtt_ms') or 0)} мс",
+                f"{int(d.get('alive_writers') or 0)}/{int(d.get('required_writers') or 0)}",
+                f"{int(d.get('coverage_pct') or 0)}%",
+            ]
+            for d in rows
+        ],
+    )
+    coverage = int(report.get("coverage_pct") or 0)
+    # Порог 0 — предупреждения выключены: показываем цифры без приговора.
+    icon = "🟢" if threshold <= 0 or coverage >= threshold else "🔴"
+    limit = "порог выключен" if threshold <= 0 else f"порог {threshold}%"
+    return (
+        f"<b>Дата-центры Telegram</b>\n"
+        f"{icon} Покрытие {coverage}%, {limit} — писателей "
+        f"{report.get('alive_writers', 0)} из {report.get('required_writers', 0)}\n{table}\n"
+        "<i>Писатели: живых / нужно. Это связь движка с Telegram, не доступность прокси.</i>"
+    )

@@ -43,10 +43,11 @@ tui_tgbot_menu() {
         echo -e "  ${CYAN}[4]${NC}  Администраторы: добавить / убрать"
         echo -e "  ${CYAN}[5]${NC}  Уведомления и таймеры"
         echo -e "  ${CYAN}[6]${NC}  Автобэкап в телеграм"
-        echo -e "  ${CYAN}[7]${NC}  Журнал службы"
-        echo -e "  ${CYAN}[8]${NC}  Обновить код бота"
-        echo -e "  ${CYAN}[9]${NC}  Переустановить"
-        echo -e "  ${RED}[10]${NC} Удалить бота"
+        echo -e "  ${CYAN}[7]${NC}  Прокси для Telegram: $(_tui_tgbot_proxy_line)"
+        echo -e "  ${CYAN}[8]${NC}  Журнал службы"
+        echo -e "  ${CYAN}[9]${NC}  Обновить код бота"
+        echo -e "  ${CYAN}[10]${NC} Переустановить"
+        echo -e "  ${RED}[11]${NC} Удалить бота"
         echo ""
         echo -e "  ${DIM}[0]${NC}  Назад"
         echo ""
@@ -67,10 +68,11 @@ tui_tgbot_menu() {
             4)  _tui_tgbot_admins; press_any_key ;;
             5)  _tui_tgbot_notify ;;
             6)  _tui_tgbot_autobackup ;;
-            7)  journalctl -u "$TGBOT_SERVICE" -n 60 --no-pager; press_any_key ;;
-            8)  tgbot_update_sources && log_success "Код обновлён, бот перезапущен"; press_any_key ;;
-            9)  tgbot_install; press_any_key ;;
-            10) tgbot_uninstall; press_any_key; return ;;
+            7)  _tui_tgbot_proxy; press_any_key ;;
+            8)  journalctl -u "$TGBOT_SERVICE" -n 60 --no-pager; press_any_key ;;
+            9)  tgbot_update_sources && log_success "Код обновлён, бот перезапущен"; press_any_key ;;
+            10) tgbot_install; press_any_key ;;
+            11) tgbot_uninstall; press_any_key; return ;;
             0|"") return ;;
         esac
     done
@@ -108,10 +110,38 @@ _tgbot_flag() {
         && echo -e "${GREEN}вкл${NC}" || echo -e "${DIM}выкл${NC}"
 }
 
+# Через что бот ходит в Telegram. Пусто в конфиге — напрямую.
+_tui_tgbot_proxy_line() {
+    local _p=""
+    command -v jq &>/dev/null && [ -s "$TGBOT_CONFIG" ] && \
+        _p=$(jq -r '.proxy // ""' "$TGBOT_CONFIG" 2>/dev/null)
+    if [ -n "$_p" ] && [ "$_p" != "null" ]; then
+        echo -e "${GREEN}${_p}${NC}"
+    else
+        echo -e "${DIM}напрямую${NC}"
+    fi
+}
+
+# Локальный SOCKS5 на случай, когда серверы Telegram с хоста недоступны.
+_tui_tgbot_proxy() {
+    echo ""
+    echo -e "  ${DIM}Бот пойдёт к Telegram через локальный SOCKS5. Поднимаете его вы —${NC}"
+    echo -e "  ${DIM}MTProxyL прокси не ставит и за ним не следит.${NC}"
+    echo -e "  ${DIM}Формат: socks5://[логин:пароль@]хост:порт, 'off' — напрямую.${NC}"
+    echo -en "  ${BOLD}Прокси:${NC} "
+    local _v; read_line _v
+    [ -n "$_v" ] || return 0
+    tgbot_set_param proxy "$_v" || return 1
+    # Сессию бот создаёт на старте — без перезапуска настройка не применится.
+    systemctl restart "$TGBOT_SERVICE" 2>/dev/null \
+        && log_success "Бот перезапущен" \
+        || log_warn "Перезапустите бота вручную, чтобы настройка применилась"
+}
+
 _tui_tgbot_notify_lines() {
     command -v jq &>/dev/null || return 0
     [ -s "$TGBOT_CONFIG" ] || return 0
-    echo -e "  ${BOLD}Уведомления:${NC} доступность $(_tgbot_flag availability), прокси $(_tgbot_flag proxy), лимиты $(_tgbot_flag limits), бэкапы $(_tgbot_flag backup)"
+    echo -e "  ${BOLD}Уведомления:${NC} доступность $(_tgbot_flag availability), DC $(_tgbot_flag dc)$([ "$(_dc_threshold)" -eq 0 ] && echo " ${DIM}(порог выключен)${NC}"), прокси $(_tgbot_flag proxy), лимиты $(_tgbot_flag limits), бэкапы $(_tgbot_flag backup)"
 }
 
 _tui_tgbot_notify() {
@@ -121,36 +151,56 @@ _tui_tgbot_notify() {
         echo ""
         echo -e "  ${DIM}Бот пишет при смене состояния, а не на каждой проверке.${NC}"
         echo ""
+        local _dc_thr; _dc_thr=$(_dc_threshold)
+        local _dc_thr_line="ниже ${_dc_thr}%"
+        [ "$_dc_thr" -eq 0 ] && _dc_thr_line="порог выключен"
         echo -e "  ${CYAN}[1]${NC}  Доступность ниже порога: $(_tgbot_flag availability)  ${DIM}(каждые $(_tgbot_cfg_get '.intervals.availability' 15) мин)${NC}"
-        echo -e "  ${CYAN}[2]${NC}  Прокси упал / поднялся: $(_tgbot_flag proxy)  ${DIM}(каждые $(_tgbot_cfg_get '.intervals.proxy' 5) мин)${NC}"
-        echo -e "  ${CYAN}[3]${NC}  Лимиты пользователей: $(_tgbot_flag limits)  ${DIM}(каждые $(_tgbot_cfg_get '.intervals.limits' 60) мин)${NC}"
-        echo -e "  ${CYAN}[4]${NC}  Итог автобэкапа: $(_tgbot_flag backup)"
+        echo -e "  ${CYAN}[2]${NC}  Дата-центры Telegram, ${_dc_thr_line}: $(_tgbot_flag dc)  ${DIM}(каждые $(_tgbot_cfg_get '.intervals.dc' 15) мин)${NC}"
+        echo -e "  ${CYAN}[3]${NC}  Прокси упал / поднялся: $(_tgbot_flag proxy)  ${DIM}(каждые $(_tgbot_cfg_get '.intervals.proxy' 5) мин)${NC}"
+        echo -e "  ${CYAN}[4]${NC}  Лимиты пользователей: $(_tgbot_flag limits)  ${DIM}(каждые $(_tgbot_cfg_get '.intervals.limits' 60) мин)${NC}"
+        echo -e "  ${CYAN}[5]${NC}  Итог автобэкапа: $(_tgbot_flag backup)"
         echo ""
-        echo -e "  ${CYAN}[5]${NC}  Изменить период проверки"
+        echo -e "  ${CYAN}[6]${NC}  Изменить период проверки"
+        echo -e "  ${CYAN}[7]${NC}  Порог покрытия дата-центров: ${_dc_thr}%"
         echo -e "  ${DIM}[0]${NC}  Назад"
         echo ""
         local c; c=$(read_choice "выбор" "0")
         case "$c" in
             1) _tgbot_cfg_set '.notify.availability = (.notify.availability | not)' ;;
-            2) _tgbot_cfg_set '.notify.proxy = (.notify.proxy | not)' ;;
-            3) _tgbot_cfg_set '.notify.limits = (.notify.limits | not)' ;;
-            4) _tgbot_cfg_set '.notify.backup = (.notify.backup | not)' ;;
-            5) _tui_tgbot_interval ;;
+            2) _tgbot_cfg_set '.notify.dc = (.notify.dc | not)' ;;
+            3) _tgbot_cfg_set '.notify.proxy = (.notify.proxy | not)' ;;
+            4) _tgbot_cfg_set '.notify.limits = (.notify.limits | not)' ;;
+            5) _tgbot_cfg_set '.notify.backup = (.notify.backup | not)' ;;
+            6) _tui_tgbot_interval ;;
+            7) _tui_tgbot_dc_threshold ;;
             0|"") return ;;
         esac
     done
 }
 
+# Порог общий для бота, панели и CLI — он живёт в настройках MTProxyL, а не в
+# конфиге бота, поэтому и меняется командой dc.
+_tui_tgbot_dc_threshold() {
+    echo ""
+    echo -e "  ${DIM}Ниже этого покрытия бот пишет о просадке. 0 — не писать вовсе.${NC}"
+    echo -en "  ${BOLD}Порог, %${NC} ${DIM}(сейчас $(_dc_threshold))${NC}: "
+    local _v; read_line _v
+    [ -n "$_v" ] || return 0
+    dc_set_threshold "$_v" || true
+    press_any_key
+}
+
 _tui_tgbot_interval() {
     echo ""
     echo -e "  ${BOLD}Какой период менять?${NC}"
-    echo -e "    ${CYAN}[1]${NC} доступность   ${CYAN}[2]${NC} прокси   ${CYAN}[3]${NC} лимиты"
+    echo -e "    ${CYAN}[1]${NC} доступность   ${CYAN}[2]${NC} прокси   ${CYAN}[3]${NC} лимиты   ${CYAN}[4]${NC} дата-центры"
     local _what; _what=$(read_choice "выбор" "0")
     local _key
     case "$_what" in
         1) _key="availability" ;;
         2) _key="proxy" ;;
         3) _key="limits" ;;
+        4) _key="dc" ;;
         *) return ;;
     esac
     echo -en "  ${BOLD}Минут${NC} ${DIM}(текущее $(_tgbot_cfg_get ".intervals.${_key}" 15))${NC}: "

@@ -308,6 +308,11 @@ export const mtproxylUsersApi = {
       method: 'POST',
       body: JSON.stringify(limits),
     }),
+  setAdTag: (label: string, adTag: string) =>
+    request<{ output: string }>(MTPROXYL_BASE, `/users/${encodeURIComponent(label)}/adtag`, {
+      method: 'POST',
+      body: JSON.stringify({ ad_tag: adTag }),
+    }),
   toggle: (label: string, enabled: boolean) =>
     request<{ output: string }>(MTPROXYL_BASE, `/users/${encodeURIComponent(label)}/toggle`, {
       method: 'POST',
@@ -404,6 +409,7 @@ export interface TrafficReport {
     session_in: number;
     session_out: number;
     connections: number;
+    unique_ips: number;
   };
   users: TrafficUser[];
 }
@@ -600,20 +606,33 @@ export interface AvailabilityQuota {
   has_token: boolean;
 }
 
-export interface AvailabilityStatusResponse {
+/** Расписание проверок — то, что оператор задал в MTProxyL. */
+export interface AvailabilitySchedule {
+  /** Идут ли проверки по расписанию. Кнопка «Проверить сейчас» работает всегда. */
+  auto_check?: boolean;
+  /** Живёт ли systemd-таймер: автопроверка включена, а таймер мог не встать. */
+  timer_active?: boolean;
+  /** Период автопроверки, минут. */
+  interval?: number;
+  /** Сколько зондов опрашивается за проверку (кредит за зонд). */
+  probes?: number;
+  /** Порог доступности для уведомления в телеграм-боте, %. */
+  threshold?: number;
+  /** Время следующей проверки, RFC3339. Пусто, если таймер не запущен. */
+  next_run?: string;
+}
+
+export interface AvailabilityStatusResponse extends AvailabilitySchedule {
   enabled: boolean;
   status?: AvailabilityResult | null;
   quota?: AvailabilityQuota;
-  /** Идут ли проверки по расписанию. Кнопка «Проверить сейчас» работает всегда. */
-  auto_check?: boolean;
   message?: string;
 }
 
-export interface AvailabilityDetailsResponse {
+export interface AvailabilityDetailsResponse extends AvailabilitySchedule {
   enabled: boolean;
   result?: AvailabilityResult | null;
   quota?: AvailabilityQuota;
-  auto_check?: boolean;
   message?: string;
 }
 
@@ -669,6 +688,8 @@ export interface TgbotConfig {
   notify: Record<string, boolean>;
   intervals: Record<string, number>;
   autobackup: { enabled: boolean; time: string; send_file: boolean };
+  /** Локальный SOCKS5 для похода в Telegram; пусто — напрямую. */
+  proxy?: string;
   has_token: boolean;
 }
 
@@ -786,5 +807,70 @@ export const alertbotApi = {
     request<AlertbotStatusResponse>(ALERTBOT_BASE, '/settings', {
       method: 'PUT',
       body: JSON.stringify({ key, value }),
+    }),
+};
+
+// ── Маршрут до Telegram через WARP ──────────────────────────────────────────
+// Правила ставит MTProxyL, включение идёт фоновой операцией: разведка минуты.
+
+const WARP_BASE = `${BASE}/api/warp`;
+
+/** Куда выходим по версии самого Cloudflare. */
+export interface WarpExit {
+  ip: string;
+  loc: string;
+  colo: string;
+  /** false — туннель не ответил: служба может работать, а маршрута нет. */
+  confirmed: boolean;
+}
+
+export interface WarpStatus {
+  enabled: boolean;
+  /** socks — A, iface — B, upstream — C. */
+  mode: 'socks' | 'iface' | 'upstream';
+  proto: string;
+  endpoint: string;
+  location: string;
+  installed: boolean;
+  version: string;
+  socks_active: boolean;
+  redirect_active: boolean;
+  iface_active: boolean;
+  nft_applied: boolean;
+  cidr_count: number;
+  socks_port: number;
+  redirect_port: number;
+  /** Счётчик nft: сколько пакетов до Telegram ушло в туннель. */
+  matched_packets: number;
+  exit: WarpExit;
+}
+
+export interface WarpStatusResponse {
+  /** false — установленный MTProxyL старше этой возможности. */
+  supported: boolean;
+  message?: string;
+  status?: WarpStatus;
+}
+
+export interface WarpSettingsPatch {
+  location?: string;
+  endpoint?: string;
+  proto?: string;
+}
+
+export const warpApi = {
+  status: () => request<WarpStatusResponse>(WARP_BASE, '/status'),
+  enable: (mode: 'socks' | 'iface' | 'upstream') =>
+    request<MtproxylOperation>(WARP_BASE, '/enable', {
+      method: 'POST',
+      body: JSON.stringify({ mode }),
+    }),
+  disable: () => request<MtproxylOperation>(WARP_BASE, '/disable', { method: 'POST' }),
+  scan: () => request<MtproxylOperation>(WARP_BASE, '/scan', { method: 'POST' }),
+  reapply: () => request<MtproxylOperation>(WARP_BASE, '/reapply', { method: 'POST' }),
+  save: (patch: WarpSettingsPatch) =>
+    request<WarpStatusResponse>(WARP_BASE, '/settings', {
+      method: 'PUT',
+      body: JSON.stringify(patch),
     }),
 };

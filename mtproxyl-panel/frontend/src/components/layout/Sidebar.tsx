@@ -1,6 +1,6 @@
 import { NavLink } from 'react-router-dom';
 import { useBranding } from '@/hooks/useBranding';
-import { LayoutDashboard, Users, Activity, Shield, Network, Settings, ArrowUpCircle, ScrollText, LogOut, X, Sun, Moon, ToggleLeft, Globe, Archive, ShieldAlert, MapPin, Route, SlidersHorizontal, Gauge, FileCode, Puzzle, Radar, Wrench, Bot } from 'lucide-react';
+import { LayoutDashboard, Users, Activity, Shield, Network, Settings, ArrowUpCircle, ScrollText, LogOut, X, Sun, Moon, ToggleLeft, Globe, Archive, ShieldAlert, MapPin, Route, SlidersHorizontal, Gauge, FileCode, Puzzle, Radar, Wrench, Bot, Waypoints } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from '@/hooks/useTheme';
@@ -27,6 +27,7 @@ const mtproxylNavItems = [
   { to: '/traffic', icon: Gauge, label: 'Трафик', managerOnly: false },
   { to: '/nft', icon: ShieldAlert, label: 'Лимитер и защита', managerOnly: false },
   { to: '/geoblock', icon: MapPin, label: 'Блокировка стран', managerOnly: false },
+  { to: '/warp', icon: Waypoints, label: 'Telegram через WARP', managerOnly: false },
   { to: '/backups', icon: Archive, label: 'Бэкапы', managerOnly: true },
   { to: '/routes', icon: Route, label: 'Маршруты', managerOnly: true },
   { to: '/expert', icon: SlidersHorizontal, label: 'Экспертные параметры', managerOnly: true },
