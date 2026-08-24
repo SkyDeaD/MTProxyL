@@ -1,4 +1,4 @@
-import { Header } from '@/components/layout/Header';
+import { PageShell } from '@/components/layout/PageShell';
 import { ErrorAlert } from '@/components/ErrorAlert';
 import { useWsSubscription, useEndpoint } from '@/hooks/useWebSocket';
 import type {
@@ -48,24 +48,20 @@ export function RuntimePage() {
   const firstError = Object.values(errors)[0];
 
   return (
-    <div>
-      <Header title="Телеметрия" refreshing={!connected} onRefresh={refresh} />
+    <PageShell title="Телеметрия" refreshing={!connected} onRefresh={refresh}>
+      {firstError && <ErrorAlert message={firstError} onRetry={refresh} />}
 
-      <div className="p-4 lg:p-6 space-y-4">
-        {firstError && <ErrorAlert message={firstError} onRetry={refresh} />}
-
-        <GatesSection gates={gates} />
-        <ConnectionsSection data={connections} />
-        <MEPoolStateSection data={pool} />
-        <MEQualitySection data={meQuality} />
-        <UpstreamQualitySection data={upstreamQuality} />
-        <NATSTUNSection data={natStun} />
-        <MESelfTestSection data={meSelftest} />
-        <StatisticsZeroSection data={zeroAll} />
-        <MERuntimeSection data={minimalAll?.data?.me_runtime ?? null} />
-        <NetworkPathSection data={minimalAll?.data?.network_path ?? null} />
-        <RecentEventsSection data={events} />
-      </div>
-    </div>
+      <GatesSection gates={gates} />
+      <ConnectionsSection data={connections} />
+      <MEPoolStateSection data={pool} />
+      <MEQualitySection data={meQuality} />
+      <UpstreamQualitySection data={upstreamQuality} />
+      <NATSTUNSection data={natStun} />
+      <MESelfTestSection data={meSelftest} />
+      <StatisticsZeroSection data={zeroAll} />
+      <MERuntimeSection data={minimalAll?.data?.me_runtime ?? null} />
+      <NetworkPathSection data={minimalAll?.data?.network_path ?? null} />
+      <RecentEventsSection data={events} />
+    </PageShell>
   );
 }

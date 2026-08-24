@@ -79,7 +79,7 @@ export function ConnectionErrors({ badByClass, handshakeFailuresByClass }: Conne
   if (!hasData) return null;
 
   return (
-    <div className="bg-surface border border-border rounded-lg p-3 lg:p-4 space-y-4">
+    <div className="glass rounded-card p-3 lg:p-4 space-y-4">
       <h3 className="text-xs lg:text-sm font-medium text-text-secondary">Ошибки соединений</h3>
       <ErrorSection title="Ошибочные соединения" items={bad} />
       <ErrorSection title="Сбои рукопожатия" items={handshake} />

@@ -7,6 +7,7 @@ import { ManagerOnlyNotice } from '@/components/ManagerOnlyNotice';
 import { useManagerOnly } from '@/hooks/useMtproxyl';
 import { mtproxylSettingsApi, type MtproxylSetting } from '@/lib/api';
 import { MAINTENANCE_KEYS } from '@/pages/MaintenancePage';
+import { PageShell } from '@/components/layout/PageShell';
 
 /**
  * Настройки сгруппированы по смыслу, а не свалены одним списком из 16 полей.
@@ -119,16 +120,15 @@ export function SettingsPage() {
   const dirtyWarnings = dirty.map((k) => WARNINGS[k]).filter(Boolean);
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-xl font-semibold text-text-primary">Настройки прокси</h1>
-        <p className="text-sm text-text-secondary mt-1">
-          Настройки MTProxyL, из которых он собирает конфиг движка. Меняются через его CLI:
-          в режиме Manager конфиг примонтирован в контейнер только для чтения, и сам telemt
-          изменить их не может.
-        </p>
-      </div>
-
+    <PageShell title="Настройки прокси"
+      description={
+        <>
+        Настройки MTProxyL, из которых он собирает конфиг движка. Меняются через его CLI:
+        в режиме Manager конфиг примонтирован в контейнер только для чтения, и сам telemt
+        изменить их не может.
+        
+        </>
+      }>
       {!modeLoading && !allowed && <ManagerOnlyNotice feature="Настройки прокси" />}
 
       {allowed && (
@@ -247,6 +247,7 @@ export function SettingsPage() {
           )}
         </>
       )}
-    </div>
+    
+    </PageShell>
   );
 }

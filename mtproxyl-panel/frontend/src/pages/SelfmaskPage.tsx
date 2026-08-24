@@ -8,6 +8,7 @@ import { OperationProgress } from '@/components/OperationProgress';
 import { ParamField } from '@/components/ParamField';
 import { mtproxylApi, type SelfmaskParam, type SelfmaskStatus } from '@/lib/api';
 import { useMtproxylOperation } from '@/hooks/useMtproxyl';
+import { PageShell } from '@/components/layout/PageShell';
 
 const SITE_SOURCE_LABELS: Record<string, string> = {
   stub: 'Заглушка «сайт недоступен»',
@@ -201,15 +202,14 @@ export function SelfmaskPage() {
   };
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-xl font-semibold text-text-primary">Selfmask</h1>
-        <p className="text-sm text-text-secondary mt-1">
-          Свой HTTPS-сайт-заглушка на том же порту: при проверке домена извне отдаётся настоящий
-          сайт, а клиенты Telegram продолжают получать MTProto.
-        </p>
-      </div>
-
+    <PageShell title="Selfmask"
+      description={
+        <>
+        Свой HTTPS-сайт-заглушка на том же порту: при проверке домена извне отдаётся настоящий
+        сайт, а клиенты Telegram продолжают получать MTProto.
+        
+        </>
+      }>
       {error && <ErrorAlert message={error} onRetry={load} />}
       {notice && (
         <div className="bg-accent/10 border border-accent/30 rounded-lg p-3 text-sm text-text-primary">
@@ -356,7 +356,8 @@ export function SelfmaskPage() {
         loadingLabel="Отключение…"
         loading={disabling}
       />
-    </div>
+    
+    </PageShell>
   );
 }
 

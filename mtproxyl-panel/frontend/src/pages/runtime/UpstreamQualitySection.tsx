@@ -69,7 +69,7 @@ export function UpstreamQualitySection({ data }: UpstreamQualitySectionProps) {
               {upstream.dc.length > 0 && (
                 <div className="flex flex-wrap gap-1 mt-2">
                   {upstream.dc.map((dc, i) => (
-                    <span key={i} className="bg-surface px-2 py-0.5 rounded text-[10px] border border-border/30">
+                    <span key={i} className="bg-surface px-2 py-0.5 rounded text-2xs border border-border/30">
                       <span className="text-text-secondary">DC {dc.dc}:</span>{' '}
                       <span className="text-text-primary">{dc.latency_ema_ms != null ? `${dc.latency_ema_ms.toFixed(1)}ms` : '-'}</span>
                       <span className="text-text-secondary ml-1">({dc.ip_preference})</span>

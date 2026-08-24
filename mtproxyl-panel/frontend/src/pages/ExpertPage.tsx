@@ -9,6 +9,7 @@ import { ParamField } from '@/components/ParamField';
 import { ManagerOnlyNotice } from '@/components/ManagerOnlyNotice';
 import { useManagerOnly } from '@/hooks/useMtproxyl';
 import { mtproxylExpertApi, type ExpertParam, type SuperExpertStatus } from '@/lib/api';
+import { PageShell } from '@/components/layout/PageShell';
 
 /** Совпадает ли параметр со строкой поиска. */
 function matches(p: ExpertParam, q: string): boolean {
@@ -137,15 +138,14 @@ export function ExpertPage() {
   };
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-xl font-semibold text-text-primary">Экспертные параметры</h1>
-        <p className="text-sm text-text-secondary mt-1">
-          Точечная правка конфигурации движка telemt. Значения накладываются поверх
-          сгенерированного конфига, поэтому переустановка и смена настроек их не затирают.
-        </p>
-      </div>
-
+    <PageShell title="Экспертные параметры"
+      description={
+        <>
+        Точечная правка конфигурации движка telemt. Значения накладываются поверх
+        сгенерированного конфига, поэтому переустановка и смена настроек их не затирают.
+        
+        </>
+      }>
       {!modeLoading && !allowed && <ManagerOnlyNotice feature="Экспертные параметры" />}
 
       {allowed && (
@@ -283,6 +283,7 @@ export function ExpertPage() {
           )}
         </>
       )}
-    </div>
+    
+    </PageShell>
   );
 }

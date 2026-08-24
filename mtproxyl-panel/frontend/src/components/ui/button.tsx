@@ -16,7 +16,7 @@ const variantStyles = {
 
 const sizeStyles = {
   sm: 'h-7 px-2.5 text-xs gap-1.5',
-  default: 'h-[34px] px-3.5 text-[12.5px] gap-[7px]',
+  default: 'h-[34px] px-3.5 text-sm gap-[7px]',
   lg: 'h-10 px-5 text-sm gap-2',
 }
 
@@ -32,7 +32,7 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         ref={ref}
         style={{ borderColor: variant === 'outline' ? 'var(--line)' : undefined }}
         className={cn(
-          'inline-flex items-center justify-center rounded-[10px] font-medium whitespace-nowrap',
+          'inline-flex items-center justify-center rounded-md font-medium whitespace-nowrap',
           'transition-[background-color,border-color,color,filter] duration-150',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background',
           'disabled:pointer-events-none disabled:opacity-50',

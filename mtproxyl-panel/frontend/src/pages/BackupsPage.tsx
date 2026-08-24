@@ -9,6 +9,7 @@ import { mtproxylApi, type MtproxylBackup } from '@/lib/api';
 import { useManagerOnly, useMtproxylOperation } from '@/hooks/useMtproxyl';
 import { formatBytes } from '@/lib/utils';
 import { ManagerOnlyNotice } from '@/components/ManagerOnlyNotice';
+import { PageShell } from '@/components/layout/PageShell';
 
 function formatDate(unixSeconds: number): string {
   if (!unixSeconds) return '—';
@@ -73,22 +74,24 @@ export function BackupsPage() {
   };
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="text-xl font-semibold text-text-primary">Бэкапы</h1>
-          <p className="text-sm text-text-secondary mt-1">
-            Настройки MTProxyL: секреты, апстримы, правила NFT и экспертные параметры.
-            Конфиг движка в архив не входит — он генерируется заново при восстановлении.
-          </p>
-        </div>
+    <PageShell title="Бэкапы"
+      description={
+        <>
+        Настройки MTProxyL: секреты, апстримы, правила NFT и экспертные параметры.
+        Конфиг движка в архив не входит — он генерируется заново при восстановлении.
+          
+        </>
+      }
+      actions={
+        <>
         {allowed && (
           <Button onClick={createBackup} disabled={creating || running}>
             {creating ? 'Создание…' : 'Создать бэкап'}
           </Button>
         )}
-      </div>
-
+      
+        </>
+      }>
       {!modeLoading && !allowed && <ManagerOnlyNotice feature="Бэкапы" />}
 
       {allowed && (
@@ -130,7 +133,7 @@ export function BackupsPage() {
                         <div className="flex items-center justify-end gap-2">
                           <a
                             href={mtproxylApi.downloadUrl(b.name)}
-                            className="inline-flex items-center gap-1.5 px-3 h-8 text-xs rounded-md border border-border text-text-primary hover:bg-surface-hover transition-colors"
+                            className="inline-flex items-center gap-1.5 px-3 h-7 text-xs rounded-md border border-border text-text-primary hover:bg-surface-hover transition-colors"
                           >
                             <Download size={14} />
                             Скачать
@@ -182,6 +185,7 @@ export function BackupsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    
+    </PageShell>
   );
 }

@@ -31,7 +31,7 @@ export function NATSTUNSection({ data }: NATSTUNSectionProps) {
                   <span className="text-text-secondary">IPv4</span>
                   <div className="text-right">
                     <div className="text-text-primary font-mono">{data.data.reflection.v4.addr}</div>
-                    <div className="text-text-secondary text-[10px]">{data.data.reflection.v4.age_secs}s ago</div>
+                    <div className="text-text-secondary text-2xs">{data.data.reflection.v4.age_secs}s ago</div>
                   </div>
                 </div>
               )}
@@ -40,7 +40,7 @@ export function NATSTUNSection({ data }: NATSTUNSectionProps) {
                   <span className="text-text-secondary">IPv6</span>
                   <div className="text-right">
                     <div className="text-text-primary font-mono">{data.data.reflection.v6.addr}</div>
-                    <div className="text-text-secondary text-[10px]">{data.data.reflection.v6.age_secs}s ago</div>
+                    <div className="text-text-secondary text-2xs">{data.data.reflection.v6.age_secs}s ago</div>
                   </div>
                 </div>
               )}

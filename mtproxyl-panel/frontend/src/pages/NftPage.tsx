@@ -9,6 +9,7 @@ import { OperationProgress } from '@/components/OperationProgress';
 import { CollapsibleSection } from '@/components/CollapsibleSection';
 import { mtproxylNetApi, type NftAction, type NftParam, type NftStatus } from '@/lib/api';
 import { useMtproxylOperation } from '@/hooks/useMtproxyl';
+import { PageShell } from '@/components/layout/PageShell';
 
 // Параметры сгруппированы, чтобы форма не читалась плоским списком из 25 ключей.
 // Порядок групп повторяет порядок разделов страницы.
@@ -183,17 +184,16 @@ export function NftPage() {
   const active = status ? activeDefense(status) : 'none';
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-xl font-semibold text-text-primary">Лимитер и защита</h1>
-        <p className="text-sm text-text-secondary mt-1">
-          Два основных способа: Zapret2 обходит DPI, Smart-режим ограничивает SYN-флуд.
-          Они обрабатывают один и тот же трафик и мешают друг другу, поэтому работает
-          что-то одно — включение любого из них снимает второй. Изменённые параметры
-          можно сохранить и сразу применить одной кнопкой либо применить правила позже.
-        </p>
-      </div>
-
+    <PageShell title="Лимитер и защита"
+      description={
+        <>
+        Два основных способа: Zapret2 обходит DPI, Smart-режим ограничивает SYN-флуд.
+        Они обрабатывают один и тот же трафик и мешают друг другу, поэтому работает
+        что-то одно — включение любого из них снимает второй. Изменённые параметры
+        можно сохранить и сразу применить одной кнопкой либо применить правила позже.
+        
+        </>
+      }>
       {error && <ErrorAlert message={error} onRetry={load} />}
       {notice && (
         <div className="bg-accent/10 border border-accent/30 rounded-lg p-3 text-sm text-text-primary">
@@ -471,7 +471,8 @@ export function NftPage() {
         confirmLabel="Продолжить"
         loadingLabel="Выполнение…"
       />
-    </div>
+    
+    </PageShell>
   );
 }
 

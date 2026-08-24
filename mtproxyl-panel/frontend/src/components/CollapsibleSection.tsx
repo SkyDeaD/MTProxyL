@@ -13,7 +13,7 @@ interface CollapsibleSectionProps {
 export function CollapsibleSection({ title, description, badge, defaultOpen = true, children }: CollapsibleSectionProps) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className="bg-surface border border-border rounded-lg overflow-hidden">
+    <div className="glass rounded-card overflow-hidden">
       <button
         onClick={() => setOpen(!open)}
         className="w-full flex items-center justify-between py-3 lg:py-4 px-4 hover:bg-surface-hover transition-colors text-left min-h-[44px]"

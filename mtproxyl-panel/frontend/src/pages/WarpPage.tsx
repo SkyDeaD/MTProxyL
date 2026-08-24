@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Waypoints, RefreshCw, Search } from 'lucide-react';
-import { Header } from '@/components/layout/Header';
+import { PageShell } from '@/components/layout/PageShell';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -59,103 +59,99 @@ export function WarpPage() {
   };
 
   return (
-    <div>
-      <Header title="Telegram через WARP" refreshing={loading} onRefresh={load} />
+    <PageShell title="Telegram через WARP" refreshing={loading} onRefresh={load}>
+      <p className="text-sm text-text-secondary max-w-3xl">
+        Нужно там, где серверы Telegram с хоста недоступны. В туннель Cloudflare
+        WARP уходят только подсети Telegram — клиенты приходят на сервер как
+        раньше. Эндпоинты ищет{' '}
+        <a
+          href="https://github.com/vernette/warpscout"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-accent hover:underline"
+        >
+          warpscout
+        </a>
+        , правила ставит MTProxyL.
+      </p>
 
-      <div className="p-4 lg:p-6 space-y-4 lg:space-y-6">
-        <p className="text-sm text-text-secondary max-w-3xl">
-          Нужно там, где серверы Telegram с хоста недоступны. В туннель Cloudflare
-          WARP уходят только подсети Telegram — клиенты приходят на сервер как
-          раньше. Эндпоинты ищет{' '}
-          <a
-            href="https://github.com/vernette/warpscout"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-accent hover:underline"
-          >
-            warpscout
-          </a>
-          , правила ставит MTProxyL.
-        </p>
+      {error && <ErrorAlert message={error} onRetry={load} />}
+      <OperationProgress operation={operation} onDismiss={dismiss} />
 
-        {error && <ErrorAlert message={error} onRetry={load} />}
-        <OperationProgress operation={operation} onDismiss={dismiss} />
+      {unsupported && <Card className="p-6 text-sm text-text-secondary">{unsupported}</Card>}
 
-        {unsupported && <Card className="p-6 text-sm text-text-secondary">{unsupported}</Card>}
+      {status && (
+        <>
+          <StateCard status={status} />
 
-        {status && (
-          <>
-            <StateCard status={status} />
+          <Card className="p-4 space-y-3">
+            <div className="text-sm font-medium text-text-primary">Включение</div>
+            <p className="text-xs text-text-secondary">
+              Разведка занимает несколько минут — за ней можно следить в панели операции выше.
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                onClick={() => void act(() => warpApi.enable('socks'))}
+                disabled={busy || running}
+                variant={status.enabled && status.mode === 'socks' ? 'default' : 'outline'}
+                size="sm"
+                className="gap-2"
+              >
+                <Waypoints size={14} /> Вариант A — SOCKS5 + redsocks
+              </Button>
+              <Button
+                onClick={() => void act(() => warpApi.enable('iface'))}
+                disabled={busy || running}
+                variant={status.enabled && status.mode === 'iface' ? 'default' : 'outline'}
+                size="sm"
+                className="gap-2"
+              >
+                <Waypoints size={14} /> Вариант B — интерфейс WireGuard
+              </Button>
+              <Button
+                onClick={() => void act(() => warpApi.enable('upstream'))}
+                disabled={busy || running}
+                variant={status.enabled && status.mode === 'upstream' ? 'default' : 'outline'}
+                size="sm"
+                className="gap-2"
+              >
+                <Waypoints size={14} /> Вариант C — socks5-upstream движка
+              </Button>
+              <Button
+                onClick={() => void act(() => warpApi.disable())}
+                disabled={busy || running || !status.enabled}
+                variant="outline"
+                size="sm"
+              >
+                Выключить
+              </Button>
+              <Button
+                onClick={() => void act(() => warpApi.scan())}
+                disabled={busy || running}
+                variant="outline"
+                size="sm"
+                className="gap-2"
+              >
+                <Search size={14} /> Разведка
+              </Button>
+              <Button
+                onClick={() => void act(() => warpApi.reapply())}
+                disabled={busy || running || !status.enabled}
+                variant="outline"
+                size="sm"
+                className="gap-2"
+              >
+                <RefreshCw size={14} /> Переприменить правила
+              </Button>
+            </div>
+            <WarningMe />
+          </Card>
 
-            <Card className="p-4 space-y-3">
-              <div className="text-sm font-medium text-text-primary">Включение</div>
-              <p className="text-xs text-text-secondary">
-                Разведка занимает несколько минут — за ней можно следить в панели операции выше.
-              </p>
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  onClick={() => void act(() => warpApi.enable('socks'))}
-                  disabled={busy || running}
-                  variant={status.enabled && status.mode === 'socks' ? 'default' : 'outline'}
-                  size="sm"
-                  className="gap-2"
-                >
-                  <Waypoints size={14} /> Вариант A — SOCKS5 + redsocks
-                </Button>
-                <Button
-                  onClick={() => void act(() => warpApi.enable('iface'))}
-                  disabled={busy || running}
-                  variant={status.enabled && status.mode === 'iface' ? 'default' : 'outline'}
-                  size="sm"
-                  className="gap-2"
-                >
-                  <Waypoints size={14} /> Вариант B — интерфейс WireGuard
-                </Button>
-                <Button
-                  onClick={() => void act(() => warpApi.enable('upstream'))}
-                  disabled={busy || running}
-                  variant={status.enabled && status.mode === 'upstream' ? 'default' : 'outline'}
-                  size="sm"
-                  className="gap-2"
-                >
-                  <Waypoints size={14} /> Вариант C — socks5-upstream движка
-                </Button>
-                <Button
-                  onClick={() => void act(() => warpApi.disable())}
-                  disabled={busy || running || !status.enabled}
-                  variant="outline"
-                  size="sm"
-                >
-                  Выключить
-                </Button>
-                <Button
-                  onClick={() => void act(() => warpApi.scan())}
-                  disabled={busy || running}
-                  variant="outline"
-                  size="sm"
-                  className="gap-2"
-                >
-                  <Search size={14} /> Разведка
-                </Button>
-                <Button
-                  onClick={() => void act(() => warpApi.reapply())}
-                  disabled={busy || running || !status.enabled}
-                  variant="outline"
-                  size="sm"
-                  className="gap-2"
-                >
-                  <RefreshCw size={14} /> Переприменить правила
-                </Button>
-              </div>
-              <WarningMe />
-            </Card>
-
-            <VariantsHelp />
-            <SettingsForm status={status} onSaved={load} />
-          </>
-        )}
-      </div>
-    </div>
+          <VariantsHelp />
+          <SettingsForm status={status} onSaved={load} />
+        </>
+      )}
+    </PageShell>
   );
 }
 
@@ -335,7 +331,7 @@ function SettingsForm({ status, onSaved }: { status: WarpStatus; onSaved: () => 
             placeholder="пусто — лучший по задержке"
             spellCheck={false}
           />
-          <span className="text-[11px] text-text-secondary/80">
+          <span className="text-xs text-text-secondary/80">
             Страны двумя буквами (DE, NL, FI), узлы Cloudflare тремя, по коду
             аэропорта (FRA, AMS, HEL). Через запятую, можно смешивать. Чем уже
             список, тем выше шанс, что живых эндпоинтов не найдётся вовсе.
@@ -349,7 +345,7 @@ function SettingsForm({ status, onSaved }: { status: WarpStatus; onSaved: () => 
             placeholder="188.114.98.58:2408"
             spellCheck={false}
           />
-          <span className="text-[11px] text-text-secondary/80">
+          <span className="text-xs text-text-secondary/80">
             Пусто — искать разведкой. Закреплённый избавляет от полной разведки при
             старте; если он замолчит, MTProxyL всё равно найдёт новый.
           </span>
@@ -359,13 +355,13 @@ function SettingsForm({ status, onSaved }: { status: WarpStatus; onSaved: () => 
           <select
             value={proto}
             onChange={(e) => setProto(e.target.value)}
-            className="h-9 rounded-md border border-border bg-surface px-3 text-sm text-text-primary"
+            className="h-[34px] rounded-md border border-border bg-surface px-3 text-sm text-text-primary"
           >
             <option value="awg">awg — обфусцированный, проходит чаще всего</option>
             <option value="wg">wg — обычный WireGuard, быстрее</option>
             <option value="masque">masque — поверх QUIC</option>
           </select>
-          <span className="text-[11px] text-text-secondary/80">
+          <span className="text-xs text-text-secondary/80">
             Вариант B всегда идёт по чистому wg: awg и masque умеет только
             userspace-туннель warpscout.
           </span>

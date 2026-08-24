@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Header } from '@/components/layout/Header';
+import { PageShell } from '@/components/layout/PageShell';
 import { useMtproxyl } from '@/hooks/useMtproxyl';
 import { MetricCard } from '@/components/MetricCard';
 import { ErrorAlert } from '@/components/ErrorAlert';
@@ -114,7 +114,7 @@ function AutoUpdateCard({
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-xs lg:text-sm font-semibold text-text-primary">{title}</h3>
         {state.last_check_at && (
-          <span className="text-[10px] lg:text-xs text-text-secondary">
+          <span className="text-2xs lg:text-xs text-text-secondary">
             Последняя проверка: {new Date(state.last_check_at).toLocaleString('ru-RU')}
           </span>
         )}
@@ -291,7 +291,7 @@ function ProgressSteps({ phase, currentStep }: { phase: string; currentStep: num
                 )}
               </div>
               <span className={cn(
-                'text-[10px] mt-1.5 truncate max-w-full text-center px-0.5',
+                'text-2xs mt-1.5 truncate max-w-full text-center px-0.5',
                 isActive && 'text-accent font-medium',
                 isCompleted && 'text-success',
                 isFailed && 'text-danger',
@@ -329,7 +329,7 @@ function UpdateLog({ log, defaultOpen }: { log: string[]; defaultOpen?: boolean 
       </summary>
       <div
         ref={logRef}
-        className="mt-2 max-h-56 overflow-y-auto bg-background rounded-md p-3 font-mono text-[11px] leading-relaxed space-y-px"
+        className="mt-2 max-h-56 overflow-y-auto bg-background rounded-md p-3 font-mono text-xs leading-relaxed space-y-px"
       >
         {log.map((line, i) => (
           <div key={i} className={getLogLineColor(line)}>{line}</div>
@@ -582,319 +582,316 @@ export function UpdatePage() {
   const panelCurrentStep = panelStatus ? PHASE_STEPS.indexOf(panelStatus.phase) : -1;
 
   return (
-    <div className="min-h-screen">
-      <Header title="Обновление" onRefresh={() => { fetchReleases(); fetchPanelReleases(); }} />
-      <div className="p-4 lg:p-6 space-y-4 lg:space-y-6 max-w-3xl">
+    <PageShell title="Обновление" onRefresh={() => { fetchReleases(); fetchPanelReleases(); }} className="max-w-3xl">
+      {/* MTProxyL сам обновляет себя, поэтому раздел живёт отдельно от
+          автообновления панели и движка. */}
+      <MtproxylUpdateCard />
 
-        {/* MTProxyL сам обновляет себя, поэтому раздел живёт отдельно от
-            автообновления панели и движка. */}
-        <MtproxylUpdateCard />
+      {/* Версия движка живёт отдельно от версии скрипта: их обновляют
+          независимо, и путать их — терять час на «почему не изменилось». */}
+      <MtproxylEngineCard />
 
-        {/* Версия движка живёт отдельно от версии скрипта: их обновляют
-            независимо, и путать их — терять час на «почему не изменилось». */}
-        <MtproxylEngineCard />
-
-        {/* Auto-update settings */}
-        {autoStatus && (
-          <div className="bg-surface rounded-lg p-4 lg:p-5 border border-border">
-            <h2 className="text-xs lg:text-sm font-semibold text-text-primary mb-3 lg:mb-4">Автообновление</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 lg:gap-4">
+      {/* Auto-update settings */}
+      {autoStatus && (
+        <div className="bg-surface rounded-lg p-4 lg:p-5 border border-border">
+          <h2 className="text-xs lg:text-sm font-semibold text-text-primary mb-3 lg:mb-4">Автообновление</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 lg:gap-4">
+            <AutoUpdateCard
+              title="Panel"
+              state={autoStatus.panel}
+              onSave={(cfg) => handleAutoUpdateConfig('panel', cfg)}
+            />
+            {!mtproxylEnabled && (
               <AutoUpdateCard
-                title="Panel"
-                state={autoStatus.panel}
-                onSave={(cfg) => handleAutoUpdateConfig('panel', cfg)}
+                title="Telemt"
+                state={autoStatus.telemt}
+                onSave={(cfg) => handleAutoUpdateConfig('telemt', cfg)}
               />
-              {!mtproxylEnabled && (
-                <AutoUpdateCard
-                  title="Telemt"
-                  state={autoStatus.telemt}
-                  onSave={(cfg) => handleAutoUpdateConfig('telemt', cfg)}
-                />
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Panel Update Section */}
-        <div className="bg-surface rounded-lg p-4 lg:p-5 border border-border">
-          <div className="flex items-center justify-between mb-3 lg:mb-4">
-            <h2 className="text-xs lg:text-sm font-semibold text-text-primary">Версия панели</h2>
-            <button
-              onClick={fetchPanelReleases}
-              disabled={panelReleasesLoading || !!isPanelUpdating}
-              className={cn(
-                'flex items-center gap-1.5 lg:gap-2 px-2.5 lg:px-3 py-1.5 rounded-md text-xs font-medium transition-colors',
-                'bg-accent/15 text-accent hover:bg-accent/25',
-                'disabled:opacity-50 disabled:cursor-not-allowed'
-              )}
-            >
-              <RefreshCw size={12} className={cn('lg:w-3.5 lg:h-3.5', panelReleasesLoading && 'animate-spin')} />
-              <span className="hidden sm:inline">Обновить список</span>
-              <span className="sm:hidden">Обновить</span>
-            </button>
-          </div>
-
-          {panelError && <ErrorAlert message={panelError} />}
-
-          <div className="space-y-3 lg:space-y-4">
-            <div className="grid grid-cols-2 gap-2 lg:gap-3">
-              <MetricCard label="Текущая версия" value={panelCurrentVersion || '—'} />
-              <div className="flex items-center">
-                <VersionSelect
-                  releases={panelReleases}
-                  selected={panelSelectedRelease}
-                  onSelect={setPanelSelectedRelease}
-                  loading={panelReleasesLoading}
-                  error={panelReleasesError}
-                  onRetry={fetchPanelReleases}
-                  currentVersion={panelCurrentVersion}
-                />
-              </div>
-            </div>
-
-            {panelSelectedRelease && (
-              <div className="bg-accent/10 border border-accent/30 rounded-md p-3 lg:p-4">
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-xs lg:text-sm font-medium text-accent">
-                      {panelSelectedRelease.name}
-                    </p>
-                    <p className="text-xs text-text-secondary mt-1">
-                      Опубликовано {new Date(panelSelectedRelease.published_at).toLocaleDateString('ru-RU')}
-                      {' · '}
-                      <a
-                        href={panelSelectedRelease.html_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-accent hover:underline"
-                      >
-                        заметки о релизе
-                      </a>
-                    </p>
-                  </div>
-                  <button
-                    onClick={handlePanelApply}
-                    disabled={!panelSelectedRelease || !!isPanelUpdating}
-                    className={cn(
-                      'flex items-center justify-center gap-2 px-3 lg:px-4 py-2 rounded-md text-xs lg:text-sm font-medium transition-colors w-full sm:w-auto',
-                      'bg-accent text-white hover:bg-accent/90',
-                      'disabled:opacity-50 disabled:cursor-not-allowed'
-                    )}
-                  >
-                    <Download size={14} className="lg:w-4 lg:h-4" />
-                    Обновить
-                  </button>
-                </div>
-
-                {panelSelectedRelease.changelog && (
-                  <details className="mt-3">
-                    <summary className="text-xs text-text-secondary cursor-pointer hover:text-text-primary">
-                      Список изменений
-                    </summary>
-                    <pre className="mt-2 text-xs text-text-secondary whitespace-pre-wrap bg-background rounded p-2 lg:p-3 max-h-48 overflow-y-auto">
-                      {panelSelectedRelease.changelog}
-                    </pre>
-                  </details>
-                )}
-              </div>
-            )}
-
-            {!panelSelectedRelease && !panelReleasesLoading && panelReleases.length === 0 && !panelReleasesError && (
-              <div className="flex items-center gap-2 text-xs lg:text-sm text-success">
-                <CheckCircle2 size={14} className="lg:w-4 lg:h-4" />
-                Установлена последняя версия
-              </div>
             )}
           </div>
         </div>
+      )}
 
-        {/* Panel Update Progress */}
-        {panelStatus && panelStatus.phase !== 'idle' && (
-          <div className="bg-surface rounded-lg p-4 lg:p-5 border border-border">
-            <h2 className="text-xs lg:text-sm font-semibold text-text-primary mb-3 lg:mb-4">Ход обновления Panel</h2>
-
-            <ProgressSteps phase={panelStatus.phase} currentStep={panelCurrentStep} />
-
-            {panelStatus.message && (
-              <p className="text-xs text-text-secondary bg-background rounded p-2.5">
-                {panelStatus.message}
-              </p>
+      {/* Panel Update Section */}
+      <div className="bg-surface rounded-lg p-4 lg:p-5 border border-border">
+        <div className="flex items-center justify-between mb-3 lg:mb-4">
+          <h2 className="text-xs lg:text-sm font-semibold text-text-primary">Версия панели</h2>
+          <button
+            onClick={fetchPanelReleases}
+            disabled={panelReleasesLoading || !!isPanelUpdating}
+            className={cn(
+              'flex items-center gap-1.5 lg:gap-2 px-2.5 lg:px-3 py-1.5 rounded-md text-xs font-medium transition-colors',
+              'bg-accent/15 text-accent hover:bg-accent/25',
+              'disabled:opacity-50 disabled:cursor-not-allowed'
             )}
-
-            {panelStatus.phase === 'error' && panelStatus.error && (
-              <div className="mt-3">
-                <ErrorAlert message={panelStatus.error} />
-              </div>
-            )}
-
-            {panelStatus.phase === 'done' && (
-              <div className="flex items-center gap-2 text-xs lg:text-sm text-success mt-2">
-                <CheckCircle2 size={14} className="lg:w-4 lg:h-4" />
-                {panelStatus.message}
-              </div>
-            )}
-
-            {panelStatus.log && panelStatus.log.length > 0 && (
-              <UpdateLog log={panelStatus.log} defaultOpen={panelStatus.phase === 'error'} />
-            )}
-          </div>
-        )}
-
-        {/* Telemt Update Section */}
-        {mtproxylEnabled ? (
-          <div className="bg-surface rounded-lg p-4 lg:p-5 border border-border">
-            <h2 className="text-xs lg:text-sm font-semibold text-text-primary mb-2">Версия Telemt</h2>
-            <p className="text-sm text-text-secondary">
-              Движком telemt управляет MTProxyL — в режиме Manager он запускается в Docker,
-              а не как systemd-сервис, поэтому встроенный механизм обновления здесь неприменим.
-              Обновляйте движок через MTProxyL: <code className="font-mono text-text-primary">mtproxyl engine</code>.
-            </p>
-          </div>
-        ) : (
-        <>
-        {error && <ErrorAlert message={error} />}
-
-        <div className="bg-surface rounded-lg p-4 lg:p-5 border border-border">
-          <div className="flex items-center justify-between mb-3 lg:mb-4">
-            <h2 className="text-xs lg:text-sm font-semibold text-text-primary">Версия Telemt</h2>
-            <button
-              onClick={fetchReleases}
-              disabled={releasesLoading || !!isUpdating}
-              className={cn(
-                'flex items-center gap-1.5 lg:gap-2 px-2.5 lg:px-3 py-1.5 rounded-md text-xs font-medium transition-colors',
-                'bg-accent/15 text-accent hover:bg-accent/25',
-                'disabled:opacity-50 disabled:cursor-not-allowed'
-              )}
-            >
-              <RefreshCw size={12} className={cn('lg:w-3.5 lg:h-3.5', releasesLoading && 'animate-spin')} />
-              <span className="hidden sm:inline">Обновить список</span>
-              <span className="sm:hidden">Обновить</span>
-            </button>
-          </div>
-
-          <div className="space-y-3 lg:space-y-4">
-            <div className="grid grid-cols-2 gap-2 lg:gap-3">
-              <MetricCard label="Текущая версия" value={currentVersion || '—'} />
-              <div className="flex items-center">
-                <VersionSelect
-                  releases={releases}
-                  selected={selectedRelease}
-                  onSelect={setSelectedRelease}
-                  loading={releasesLoading}
-                  error={releasesError}
-                  onRetry={fetchReleases}
-                  currentVersion={currentVersion}
-                />
-              </div>
-            </div>
-
-            {selectedRelease && (
-              <div className="bg-accent/10 border border-accent/30 rounded-md p-3 lg:p-4">
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-xs lg:text-sm font-medium text-accent">
-                      {selectedRelease.name}
-                    </p>
-                    <p className="text-xs text-text-secondary mt-1">
-                      Опубликовано {new Date(selectedRelease.published_at).toLocaleDateString('ru-RU')}
-                      {' · '}
-                      <a
-                        href={selectedRelease.html_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-accent hover:underline"
-                      >
-                        заметки о релизе
-                      </a>
-                    </p>
-                  </div>
-                  <button
-                    onClick={handleApply}
-                    disabled={!selectedRelease || !!isUpdating}
-                    className={cn(
-                      'flex items-center justify-center gap-2 px-3 lg:px-4 py-2 rounded-md text-xs lg:text-sm font-medium transition-colors w-full sm:w-auto',
-                      'bg-accent text-white hover:bg-accent/90',
-                      'disabled:opacity-50 disabled:cursor-not-allowed'
-                    )}
-                  >
-                    <Download size={14} className="lg:w-4 lg:h-4" />
-                    Обновить
-                  </button>
-                </div>
-
-                {selectedRelease.changelog && (
-                  <details className="mt-3">
-                    <summary className="text-xs text-text-secondary cursor-pointer hover:text-text-primary">
-                      Список изменений
-                    </summary>
-                    <pre className="mt-2 text-xs text-text-secondary whitespace-pre-wrap bg-background rounded p-2 lg:p-3 max-h-48 overflow-y-auto">
-                      {selectedRelease.changelog}
-                    </pre>
-                  </details>
-                )}
-              </div>
-            )}
-
-            {!selectedRelease && !releasesLoading && releases.length === 0 && !releasesError && (
-              <div className="flex items-center gap-2 text-xs lg:text-sm text-success">
-                <CheckCircle2 size={14} className="lg:w-4 lg:h-4" />
-                Установлена последняя версия
-              </div>
-            )}
-          </div>
+          >
+            <RefreshCw size={14} className={cn('lg:w-3.5 lg:h-3.5', panelReleasesLoading && 'animate-spin')} />
+            <span className="hidden sm:inline">Обновить список</span>
+            <span className="sm:hidden">Обновить</span>
+          </button>
         </div>
 
-        {/* Update Progress */}
-        {status && status.phase !== 'idle' && (
-          <div className="bg-surface rounded-lg p-4 lg:p-5 border border-border">
-            <h2 className="text-xs lg:text-sm font-semibold text-text-primary mb-3 lg:mb-4">Ход обновления Telemt</h2>
+        {panelError && <ErrorAlert message={panelError} />}
 
-            <ProgressSteps phase={status.phase} currentStep={currentStep} />
-
-            {status.message && (
-              <p className="text-xs text-text-secondary bg-background rounded p-2.5">
-                {status.message}
-              </p>
-            )}
-
-            {status.phase === 'error' && status.error && (
-              <div className="mt-3">
-                <ErrorAlert message={status.error} />
-              </div>
-            )}
-
-            {status.phase === 'done' && (
-              <div className="flex items-center gap-2 text-xs lg:text-sm text-success mt-2">
-                <CheckCircle2 size={14} className="lg:w-4 lg:h-4" />
-                {status.message}
-              </div>
-            )}
-
-            {status.log && status.log.length > 0 && (
-              <UpdateLog log={status.log} defaultOpen={status.phase === 'error'} />
-            )}
+        <div className="space-y-3 lg:space-y-4">
+          <div className="grid grid-cols-2 gap-2 lg:gap-3">
+            <MetricCard label="Текущая версия" value={panelCurrentVersion || '—'} />
+            <div className="flex items-center">
+              <VersionSelect
+                releases={panelReleases}
+                selected={panelSelectedRelease}
+                onSelect={setPanelSelectedRelease}
+                loading={panelReleasesLoading}
+                error={panelReleasesError}
+                onRetry={fetchPanelReleases}
+                currentVersion={panelCurrentVersion}
+              />
+            </div>
           </div>
-        )}
 
-        {showConfirm && selectedRelease && (
-          <ConfirmModal
-            release={selectedRelease}
-            onConfirm={doApply}
-            onCancel={() => setShowConfirm(false)}
-          />
-        )}
-        </>
-        )}
+          {panelSelectedRelease && (
+            <div className="bg-accent/10 border border-accent/30 rounded-md p-3 lg:p-4">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-xs lg:text-sm font-medium text-accent">
+                    {panelSelectedRelease.name}
+                  </p>
+                  <p className="text-xs text-text-secondary mt-1">
+                    Опубликовано {new Date(panelSelectedRelease.published_at).toLocaleDateString('ru-RU')}
+                    {' · '}
+                    <a
+                      href={panelSelectedRelease.html_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-accent hover:underline"
+                    >
+                      заметки о релизе
+                    </a>
+                  </p>
+                </div>
+                <button
+                  onClick={handlePanelApply}
+                  disabled={!panelSelectedRelease || !!isPanelUpdating}
+                  className={cn(
+                    'flex items-center justify-center gap-2 px-3 lg:px-4 py-2 rounded-md text-xs lg:text-sm font-medium transition-colors w-full sm:w-auto',
+                    'bg-accent text-white hover:bg-accent/90',
+                    'disabled:opacity-50 disabled:cursor-not-allowed'
+                  )}
+                >
+                  <Download size={14} className="lg:w-4 lg:h-4" />
+                  Обновить
+                </button>
+              </div>
 
-        {/* Confirm Modals */}
-        {panelShowConfirm && panelSelectedRelease && (
-          <ConfirmModal
-            release={panelSelectedRelease}
-            onConfirm={doPanelApply}
-            onCancel={() => setPanelShowConfirm(false)}
-          />
-        )}
+              {panelSelectedRelease.changelog && (
+                <details className="mt-3">
+                  <summary className="text-xs text-text-secondary cursor-pointer hover:text-text-primary">
+                    Список изменений
+                  </summary>
+                  <pre className="mt-2 text-xs text-text-secondary whitespace-pre-wrap bg-background rounded p-2 lg:p-3 max-h-48 overflow-y-auto">
+                    {panelSelectedRelease.changelog}
+                  </pre>
+                </details>
+              )}
+            </div>
+          )}
+
+          {!panelSelectedRelease && !panelReleasesLoading && panelReleases.length === 0 && !panelReleasesError && (
+            <div className="flex items-center gap-2 text-xs lg:text-sm text-success">
+              <CheckCircle2 size={14} className="lg:w-4 lg:h-4" />
+              Установлена последняя версия
+            </div>
+          )}
+        </div>
       </div>
-    </div>
+
+      {/* Panel Update Progress */}
+      {panelStatus && panelStatus.phase !== 'idle' && (
+        <div className="bg-surface rounded-lg p-4 lg:p-5 border border-border">
+          <h2 className="text-xs lg:text-sm font-semibold text-text-primary mb-3 lg:mb-4">Ход обновления Panel</h2>
+
+          <ProgressSteps phase={panelStatus.phase} currentStep={panelCurrentStep} />
+
+          {panelStatus.message && (
+            <p className="text-xs text-text-secondary bg-background rounded p-2.5">
+              {panelStatus.message}
+            </p>
+          )}
+
+          {panelStatus.phase === 'error' && panelStatus.error && (
+            <div className="mt-3">
+              <ErrorAlert message={panelStatus.error} />
+            </div>
+          )}
+
+          {panelStatus.phase === 'done' && (
+            <div className="flex items-center gap-2 text-xs lg:text-sm text-success mt-2">
+              <CheckCircle2 size={14} className="lg:w-4 lg:h-4" />
+              {panelStatus.message}
+            </div>
+          )}
+
+          {panelStatus.log && panelStatus.log.length > 0 && (
+            <UpdateLog log={panelStatus.log} defaultOpen={panelStatus.phase === 'error'} />
+          )}
+        </div>
+      )}
+
+      {/* Telemt Update Section */}
+      {mtproxylEnabled ? (
+        <div className="bg-surface rounded-lg p-4 lg:p-5 border border-border">
+          <h2 className="text-xs lg:text-sm font-semibold text-text-primary mb-2">Версия Telemt</h2>
+          <p className="text-sm text-text-secondary">
+            Движком telemt управляет MTProxyL — в режиме Manager он запускается в Docker,
+            а не как systemd-сервис, поэтому встроенный механизм обновления здесь неприменим.
+            Обновляйте движок через MTProxyL: <code className="font-mono text-text-primary">mtproxyl engine</code>.
+          </p>
+        </div>
+      ) : (
+      <>
+      {error && <ErrorAlert message={error} />}
+
+      <div className="bg-surface rounded-lg p-4 lg:p-5 border border-border">
+        <div className="flex items-center justify-between mb-3 lg:mb-4">
+          <h2 className="text-xs lg:text-sm font-semibold text-text-primary">Версия Telemt</h2>
+          <button
+            onClick={fetchReleases}
+            disabled={releasesLoading || !!isUpdating}
+            className={cn(
+              'flex items-center gap-1.5 lg:gap-2 px-2.5 lg:px-3 py-1.5 rounded-md text-xs font-medium transition-colors',
+              'bg-accent/15 text-accent hover:bg-accent/25',
+              'disabled:opacity-50 disabled:cursor-not-allowed'
+            )}
+          >
+            <RefreshCw size={14} className={cn('lg:w-3.5 lg:h-3.5', releasesLoading && 'animate-spin')} />
+            <span className="hidden sm:inline">Обновить список</span>
+            <span className="sm:hidden">Обновить</span>
+          </button>
+        </div>
+
+        <div className="space-y-3 lg:space-y-4">
+          <div className="grid grid-cols-2 gap-2 lg:gap-3">
+            <MetricCard label="Текущая версия" value={currentVersion || '—'} />
+            <div className="flex items-center">
+              <VersionSelect
+                releases={releases}
+                selected={selectedRelease}
+                onSelect={setSelectedRelease}
+                loading={releasesLoading}
+                error={releasesError}
+                onRetry={fetchReleases}
+                currentVersion={currentVersion}
+              />
+            </div>
+          </div>
+
+          {selectedRelease && (
+            <div className="bg-accent/10 border border-accent/30 rounded-md p-3 lg:p-4">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-xs lg:text-sm font-medium text-accent">
+                    {selectedRelease.name}
+                  </p>
+                  <p className="text-xs text-text-secondary mt-1">
+                    Опубликовано {new Date(selectedRelease.published_at).toLocaleDateString('ru-RU')}
+                    {' · '}
+                    <a
+                      href={selectedRelease.html_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-accent hover:underline"
+                    >
+                      заметки о релизе
+                    </a>
+                  </p>
+                </div>
+                <button
+                  onClick={handleApply}
+                  disabled={!selectedRelease || !!isUpdating}
+                  className={cn(
+                    'flex items-center justify-center gap-2 px-3 lg:px-4 py-2 rounded-md text-xs lg:text-sm font-medium transition-colors w-full sm:w-auto',
+                    'bg-accent text-white hover:bg-accent/90',
+                    'disabled:opacity-50 disabled:cursor-not-allowed'
+                  )}
+                >
+                  <Download size={14} className="lg:w-4 lg:h-4" />
+                  Обновить
+                </button>
+              </div>
+
+              {selectedRelease.changelog && (
+                <details className="mt-3">
+                  <summary className="text-xs text-text-secondary cursor-pointer hover:text-text-primary">
+                    Список изменений
+                  </summary>
+                  <pre className="mt-2 text-xs text-text-secondary whitespace-pre-wrap bg-background rounded p-2 lg:p-3 max-h-48 overflow-y-auto">
+                    {selectedRelease.changelog}
+                  </pre>
+                </details>
+              )}
+            </div>
+          )}
+
+          {!selectedRelease && !releasesLoading && releases.length === 0 && !releasesError && (
+            <div className="flex items-center gap-2 text-xs lg:text-sm text-success">
+              <CheckCircle2 size={14} className="lg:w-4 lg:h-4" />
+              Установлена последняя версия
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Update Progress */}
+      {status && status.phase !== 'idle' && (
+        <div className="bg-surface rounded-lg p-4 lg:p-5 border border-border">
+          <h2 className="text-xs lg:text-sm font-semibold text-text-primary mb-3 lg:mb-4">Ход обновления Telemt</h2>
+
+          <ProgressSteps phase={status.phase} currentStep={currentStep} />
+
+          {status.message && (
+            <p className="text-xs text-text-secondary bg-background rounded p-2.5">
+              {status.message}
+            </p>
+          )}
+
+          {status.phase === 'error' && status.error && (
+            <div className="mt-3">
+              <ErrorAlert message={status.error} />
+            </div>
+          )}
+
+          {status.phase === 'done' && (
+            <div className="flex items-center gap-2 text-xs lg:text-sm text-success mt-2">
+              <CheckCircle2 size={14} className="lg:w-4 lg:h-4" />
+              {status.message}
+            </div>
+          )}
+
+          {status.log && status.log.length > 0 && (
+            <UpdateLog log={status.log} defaultOpen={status.phase === 'error'} />
+          )}
+        </div>
+      )}
+
+      {showConfirm && selectedRelease && (
+        <ConfirmModal
+          release={selectedRelease}
+          onConfirm={doApply}
+          onCancel={() => setShowConfirm(false)}
+        />
+      )}
+      </>
+      )}
+
+      {/* Confirm Modals */}
+      {panelShowConfirm && panelSelectedRelease && (
+        <ConfirmModal
+          release={panelSelectedRelease}
+          onConfirm={doPanelApply}
+          onCancel={() => setPanelShowConfirm(false)}
+        />
+      )}
+      
+    </PageShell>
   );
 }

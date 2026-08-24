@@ -6,6 +6,7 @@ import { ErrorAlert } from '@/components/ErrorAlert';
 import { OperationProgress } from '@/components/OperationProgress';
 import { mtproxylAddonsApi, mtproxylApi, type GeoIPStatus, type SelfmaskStatus } from '@/lib/api';
 import { useMtproxylOperation } from '@/hooks/useMtproxyl';
+import { PageShell } from '@/components/layout/PageShell';
 
 export function AddonsPage() {
   const [domain, setDomain] = useState('');
@@ -80,14 +81,13 @@ export function AddonsPage() {
   };
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-xl font-semibold text-text-primary">Дополнения</h1>
-        <p className="text-sm text-text-secondary mt-1">
-          Вспомогательные проверки MTProxyL.
-        </p>
-      </div>
-
+    <PageShell title="Дополнения"
+      description={
+        <>
+        Вспомогательные проверки MTProxyL.
+        
+        </>
+      }>
       {error && <ErrorAlert message={error} />}
 
       <Card>
@@ -194,6 +194,7 @@ export function AddonsPage() {
           )}
         </CardContent>
       </Card>
-    </div>
+    
+    </PageShell>
   );
 }

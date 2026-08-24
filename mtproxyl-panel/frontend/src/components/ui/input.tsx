@@ -11,7 +11,7 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
         ref={ref}
         style={{ borderColor: 'var(--line)' }}
         className={cn(
-          'flex h-[34px] w-full rounded-[10px] border bg-surface-hover px-[11px] text-[12.5px] text-text-primary',
+          'flex h-[34px] w-full rounded-md border bg-surface-hover px-[11px] text-sm text-text-primary',
           'transition-[border-color,box-shadow] duration-150',
           'placeholder:text-text-secondary',
           'focus:outline-none focus:border-accent focus:shadow-[0_0_0_3px_var(--acc-soft)]',

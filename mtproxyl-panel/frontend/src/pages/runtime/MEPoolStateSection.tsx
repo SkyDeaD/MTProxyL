@@ -78,7 +78,7 @@ export function MEPoolStateSection({ data }: MEPoolStateSectionProps) {
           {data.data.refill.by_dc.length > 0 && (
             <div className="flex flex-wrap gap-1">
               {data.data.refill.by_dc.map((dc, i) => (
-                <span key={i} className="bg-surface px-2 py-0.5 rounded text-[10px] border border-border/30">
+                <span key={i} className="bg-surface px-2 py-0.5 rounded text-2xs border border-border/30">
                   <span className="text-text-secondary">DC {dc.dc} ({dc.family}):</span>{' '}
                   <span className="text-text-primary">{dc.inflight}</span>
                 </span>

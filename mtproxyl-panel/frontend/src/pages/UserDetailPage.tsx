@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { Header } from '@/components/layout/Header';
+import { PageShell } from '@/components/layout/PageShell';
 import { ErrorAlert } from '@/components/ErrorAlert';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { QuotaBar } from '@/components/QuotaBar';
@@ -81,9 +81,9 @@ function SortableHead({ label, sortKey, active, dir, onSort }: {
       <span className="inline-flex items-center gap-1">
         {label}
         {isActive ? (
-          dir === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />
+          dir === 'asc' ? <ArrowUp size={14} /> : <ArrowDown size={14} />
         ) : (
-          <ArrowUpDown size={12} className="text-text-secondary/40" />
+          <ArrowUpDown size={14} className="text-text-secondary/40" />
         )}
       </span>
     </TableHead>
@@ -400,10 +400,8 @@ export function UserDetailPage() {
   const hasGeo = geoData.size > 0;
 
   return (
-    <div className="min-h-screen">
-      <Header title={user ? user.username : 'Пользователь'} refreshing={loading} onRefresh={refresh} />
-
-      <div className="p-4 lg:p-6 space-y-4">
+    <>
+      <PageShell title={user ? user.username : 'Пользователь'} refreshing={loading} onRefresh={refresh}>
         <Link
           to="/users"
           className="inline-flex items-center gap-1.5 text-sm text-text-secondary hover:text-text-primary transition-colors"
@@ -411,13 +409,13 @@ export function UserDetailPage() {
           <ArrowLeft size={14} />
           Back to Users
         </Link>
-
+  
         {error && <ErrorAlert message={error.message} onRetry={refresh} />}
-
+  
         {!loading && !user && (
           <ErrorAlert message={`User "${username}" not found`} />
         )}
-
+  
         {user && (
           <>
             {/* Metric cards */}
@@ -436,10 +434,10 @@ export function UserDetailPage() {
                 value={user.expiration_rfc3339 ? new Date(user.expiration_rfc3339).toLocaleDateString() : '—'}
               />
             </div>
-
+  
             {/* Data quota */}
             {quotaSupported && quota && quota.data_quota_bytes > 0 && (
-              <div className="bg-surface border border-border rounded-lg p-4 space-y-3">
+              <div className="glass rounded-card p-4 space-y-3">
                 <div className="flex items-center justify-between gap-3">
                   <span className="font-medium text-text-primary">Квота трафика</span>
                   <Button variant="outline" size="sm" onClick={() => setResetOpen(true)}>
@@ -456,9 +454,9 @@ export function UserDetailPage() {
                 </div>
               </div>
             )}
-
+  
             {resetError && <ErrorAlert message={resetError} />}
-
+  
             {/* GeoIP status banner */}
             {geoError && (
               <div className="flex items-center gap-2 p-3 rounded-lg border border-warning/30 bg-warning/10 text-sm text-warning">
@@ -466,19 +464,19 @@ export function UserDetailPage() {
                 <span>GeoIP недоступен: {geoError}. IP-адреса показаны без геоданных.</span>
               </div>
             )}
-
+  
             {geoUnavailable && (
-              <div className="p-3 rounded-lg border border-border bg-surface text-xs text-text-secondary">
+              <div className="p-3 bg-surface-hover border border-border rounded-lg text-xs text-text-secondary">
                 База GeoIP не установлена — адреса показаны без страны и провайдера. Поставить
                 можно прямо из панели: <Link to="/addons" className="text-accent hover:underline">Дополнения</Link>.
                 Она также подхватит базу, установленную системным пакетом или geoipupdate.
               </div>
             )}
-
+  
             {geoLoading && (
               <div className="text-sm text-text-secondary">Загрузка данных GeoIP…</div>
             )}
-
+  
             {/* IP sections */}
             <CollapsibleSection
               title="Активные IP"
@@ -491,7 +489,7 @@ export function UserDetailPage() {
                 hasGeo={hasGeo}
               />
             </CollapsibleSection>
-
+  
             <CollapsibleSection
               title="Недавние IP"
               count={user.recent_unique_ips_list?.length ?? 0}
@@ -502,7 +500,7 @@ export function UserDetailPage() {
                 hasGeo={hasGeo}
               />
             </CollapsibleSection>
-
+  
             <CollapsibleSection
               title="История IP"
               count={mtproxylUser?.ip_history.length ?? 0}
@@ -520,8 +518,8 @@ export function UserDetailPage() {
             </CollapsibleSection>
           </>
         )}
-      </div>
-
+        
+      </PageShell>
       <ConfirmDialog
         open={resetOpen}
         onClose={() => setResetOpen(false)}
@@ -533,13 +531,14 @@ export function UserDetailPage() {
         confirmVariant="default"
         loading={resetting}
       />
-    </div>
+    
+    </>
   );
 }
 
 function MetricCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="bg-surface border border-border rounded-lg p-3">
+    <div className="bg-surface-hover border border-border rounded-lg p-3">
       <div className="text-xs text-text-secondary">{label}</div>
       <div className="text-lg font-semibold text-text-primary mt-1">{value}</div>
     </div>

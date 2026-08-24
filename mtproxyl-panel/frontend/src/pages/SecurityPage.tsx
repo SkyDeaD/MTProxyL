@@ -1,4 +1,4 @@
-import { Header } from '@/components/layout/Header';
+import { PageShell } from '@/components/layout/PageShell';
 import { ErrorAlert } from '@/components/ErrorAlert';
 import { TelemetryField } from '@/components/TelemetryField';
 import { useWsSubscription, useEndpoint } from '@/hooks/useWebSocket';
@@ -71,73 +71,70 @@ export function SecurityPage() {
   const flatLimits = limits ? flattenObject(limits) : {};
 
   return (
-    <div>
-      <Header title="Безопасность" refreshing={!connected} onRefresh={refresh} />
+    <PageShell title="Безопасность" refreshing={!connected} onRefresh={refresh}>
+      {firstError && <ErrorAlert message={firstError} onRetry={refresh} />}
 
-      <div className="p-4 lg:p-6 space-y-6">
-        {firstError && <ErrorAlert message={firstError} onRetry={refresh} />}
+      {posture && (
+        <div className="glass rounded-card p-4">
+          <h3 className="text-sm font-medium text-text-secondary mb-1">Состояние безопасности</h3>
+          <p className="text-xs text-text-secondary/70 mb-4">
+            Как движок сейчас настроен относительно доступа к API и сбора телеметрии.
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6">
+            {POSTURE_ORDER.map((key) => (
+              <TelemetryField
+                key={key}
+                fieldKey={key}
+                value={posture[key]}
+                variant="row"
+              />
+            ))}
+          </div>
+        </div>
+      )}
 
-        {posture && (
-          <div className="bg-surface border border-border rounded-lg p-4">
-            <h3 className="text-sm font-medium text-text-secondary mb-1">Состояние безопасности</h3>
-            <p className="text-xs text-text-secondary/70 mb-4">
-              Как движок сейчас настроен относительно доступа к API и сбора телеметрии.
-            </p>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6">
-              {POSTURE_ORDER.map((key) => (
-                <TelemetryField
-                  key={key}
-                  fieldKey={key}
-                  value={posture[key]}
-                  variant="row"
-                />
+      <div>
+        <h3 className="text-sm font-medium text-text-secondary mb-1">Белый список API</h3>
+        <p className="text-xs text-text-secondary/70 mb-3">
+          Адреса и подсети, которым движок отвечает на запросы к API. Пустой список при
+          включённой проверке означает, что не пройдёт никто.
+        </p>
+        {whitelist && whitelist.entries.length > 0 ? (
+          <div className="bg-surface-hover border border-border rounded-lg p-4">
+            <div className="flex flex-wrap gap-2">
+              {whitelist.entries.map((ip, i) => (
+                <span key={i} className="bg-background px-3 py-1.5 rounded text-sm text-text-primary font-mono border border-border/50">
+                  {ip}
+                </span>
               ))}
             </div>
           </div>
-        )}
-
-        <div>
-          <h3 className="text-sm font-medium text-text-secondary mb-1">Белый список API</h3>
-          <p className="text-xs text-text-secondary/70 mb-3">
-            Адреса и подсети, которым движок отвечает на запросы к API. Пустой список при
-            включённой проверке означает, что не пройдёт никто.
-          </p>
-          {whitelist && whitelist.entries.length > 0 ? (
-            <div className="bg-surface border border-border rounded-lg p-4">
-              <div className="flex flex-wrap gap-2">
-                {whitelist.entries.map((ip, i) => (
-                  <span key={i} className="bg-background px-3 py-1.5 rounded text-sm text-text-primary font-mono border border-border/50">
-                    {ip}
-                  </span>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <div className="bg-surface border border-border rounded-lg p-6 text-center text-text-secondary text-sm">
-              Список пуст
-            </div>
-          )}
-        </div>
-
-        {limits && (
-          <div className="bg-surface border border-border rounded-lg p-4">
-            <h3 className="text-sm font-medium text-text-secondary mb-1">Действующие лимиты</h3>
-            <p className="text-xs text-text-secondary/70 mb-3">
-              То, что движок применяет прямо сейчас, с учётом персональных настроек
-              пользователей и правил по подсетям. Ноль означает «без ограничения».
-            </p>
-            {Object.keys(flatLimits).length === 0 ? (
-              <div className="text-sm text-text-secondary">Лимиты не заданы</div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6">
-                {Object.entries(flatLimits).map(([key, value]) => (
-                  <TelemetryField key={key} fieldKey={key} value={value} variant="row" />
-                ))}
-              </div>
-            )}
+        ) : (
+          <div className="bg-surface-hover border border-border rounded-lg p-6 text-center text-text-secondary text-sm">
+            Список пуст
           </div>
         )}
       </div>
-    </div>
+
+      {limits && (
+        <div className="bg-surface-hover border border-border rounded-lg p-4">
+          <h3 className="text-sm font-medium text-text-secondary mb-1">Действующие лимиты</h3>
+          <p className="text-xs text-text-secondary/70 mb-3">
+            То, что движок применяет прямо сейчас, с учётом персональных настроек
+            пользователей и правил по подсетям. Ноль означает «без ограничения».
+          </p>
+          {Object.keys(flatLimits).length === 0 ? (
+            <div className="text-sm text-text-secondary">Лимиты не заданы</div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6">
+              {Object.entries(flatLimits).map(([key, value]) => (
+                <TelemetryField key={key} fieldKey={key} value={value} variant="row" />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      
+    </PageShell>
   );
 }

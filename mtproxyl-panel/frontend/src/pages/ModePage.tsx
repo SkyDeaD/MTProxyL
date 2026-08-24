@@ -13,6 +13,7 @@ import {
   type MtproxylModeStatus,
 } from '@/lib/api';
 import { useMtproxylOperation } from '@/hooks/useMtproxyl';
+import { PageShell } from '@/components/layout/PageShell';
 
 /** Word the user must type to confirm, mirroring MTProxyL's own CLI prompt. */
 const CONFIRM_WORD = 'yes';
@@ -154,14 +155,13 @@ export function ModePage() {
     status.own_container !== 'unknown';
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-xl font-semibold text-text-primary">Режим работы</h1>
-        <p className="text-sm text-text-secondary mt-1">
-          Определяет, владеет ли MTProxyL своим экземпляром telemt или обслуживает чужой.
-        </p>
-      </div>
-
+    <PageShell title="Режим работы"
+      description={
+        <>
+        Определяет, владеет ли MTProxyL своим экземпляром telemt или обслуживает чужой.
+        
+        </>
+      }>
       {error && <ErrorAlert message={error} onRetry={load} />}
       <OperationProgress operation={operation} onDismiss={dismiss} />
 
@@ -312,7 +312,8 @@ export function ModePage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    
+    </PageShell>
   );
 }
 

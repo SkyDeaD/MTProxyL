@@ -60,6 +60,35 @@
   --animate-led-blink: led-blink 1.5s ease-in-out infinite;
 }
 
+/*
+  Масштаб кеглей и радиусов по системе «Азур». Переопределяем встроенные имена
+  Tailwind, а не заводим свои: тогда 547 существующих text-sm/text-xs и 107
+  rounded-lg/md по всей панели становятся системными сами, без правки в каждой
+  странице — и без конфликтов с автором при следующем слиянии.
+*/
+@theme {
+  /* Микро-кегль: бейджи и капитель в шапке таблицы. */
+  --text-2xs: 10.5px;
+  --text-xs: 11.5px;
+  --text-xs--line-height: 1.45;
+  --text-sm: 12.5px;
+  --text-sm--line-height: 1.5;
+  --text-base: 13.5px;
+  --text-base--line-height: 1.5;
+  --text-lg: 15px;
+  --text-xl: 17px;
+  --text-2xl: 20px;
+
+  /* Радиусы: lg намеренно 12px, а не 18px — он стоит и на мелких элементах,
+     где крупный радиус превратил бы их в кляксы. Настоящие карточки берут
+     18px через rounded-card. */
+  --radius-sm: 7px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --radius-card: 18px;
+  --radius-modal: 22px;
+}
+
 :root, .theme-dark {
   color-scheme: dark;
 

@@ -68,7 +68,7 @@ export function UserCard({
   return (
     <div
       className={cn(
-        'bg-surface border border-border rounded-lg p-3 flex items-start gap-3',
+        'glass rounded-card p-3 flex items-start gap-3',
         'hover:border-border-hi hover:bg-surface-hover transition-colors',
         className,
       )}
@@ -99,7 +99,7 @@ export function UserCard({
           </Link>
           <span
             className={cn(
-              'inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-mono leading-none shrink-0',
+              'inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-2xs font-mono leading-none shrink-0',
               online
                 ? 'bg-status-ok/10 text-status-ok'
                 : 'bg-surface-hover text-text-secondary',
@@ -110,7 +110,7 @@ export function UserCard({
           </span>
         </div>
 
-        <div className="flex items-center gap-3 text-[11px] text-text-secondary">
+        <div className="flex items-center gap-3 text-xs text-text-secondary">
           <span>{formatBytes(totalTraffic)}</span>
           {accumulatedTraffic !== undefined && (
             <span title="Накоплено за всё время">Σ {formatBytes(accumulatedTraffic)}</span>

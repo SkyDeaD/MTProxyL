@@ -42,7 +42,7 @@ export function LoginPage() {
 
         <form
           onSubmit={handleSubmit}
-          className="glass rounded-[22px] p-6 space-y-4"
+          className="glass rounded-modal p-6 space-y-4"
         >
           <div className="space-y-2">
             <Label htmlFor="username">Имя пользователя</Label>

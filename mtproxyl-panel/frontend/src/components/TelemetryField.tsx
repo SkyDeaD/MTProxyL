@@ -44,7 +44,7 @@ export function TelemetryField({ fieldKey, value, variant = 'tile' }: TelemetryF
 
   return (
     <div
-      className="bg-surface border border-border rounded-lg p-3 min-h-[44px] flex flex-col items-center justify-center gap-1.5"
+      className="glass rounded-card p-3 min-h-[44px] flex flex-col items-center justify-center gap-1.5"
       title={meta.hint ?? fieldKey}
     >
       <span

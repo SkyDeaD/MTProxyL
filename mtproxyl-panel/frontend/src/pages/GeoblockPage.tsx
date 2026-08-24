@@ -7,6 +7,7 @@ import { ErrorAlert } from '@/components/ErrorAlert';
 import { OperationProgress } from '@/components/OperationProgress';
 import { mtproxylNetApi } from '@/lib/api';
 import { useMtproxylOperation } from '@/hooks/useMtproxyl';
+import { PageShell } from '@/components/layout/PageShell';
 
 /** Turns a country code into its flag emoji via regional indicator symbols. */
 function flag(code: string): string {
@@ -82,15 +83,14 @@ export function GeoblockPage() {
   };
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-xl font-semibold text-text-primary">Блокировка по странам</h1>
-        <p className="text-sm text-text-secondary mt-1">
-          Диапазоны адресов выбранных стран блокируются на порту прокси. Списки берутся с
-          ipdeny.com, поэтому первое добавление страны занимает время.
-        </p>
-      </div>
-
+    <PageShell title="Блокировка по странам"
+      description={
+        <>
+        Диапазоны адресов выбранных стран блокируются на порту прокси. Списки берутся с
+        ipdeny.com, поэтому первое добавление страны занимает время.
+        
+        </>
+      }>
       {error && <ErrorAlert message={error} onRetry={load} />}
       <OperationProgress operation={operation} onDismiss={dismiss} />
 
@@ -158,6 +158,7 @@ export function GeoblockPage() {
           )}
         </CardContent>
       </Card>
-    </div>
+    
+    </PageShell>
   );
 }

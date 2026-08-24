@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { ManagerOnlyNotice } from '@/components/ManagerOnlyNotice';
 import { useManagerOnly } from '@/hooks/useMtproxyl';
 import { mtproxylNetApi, type Upstream, type UpstreamSpec } from '@/lib/api';
+import { PageShell } from '@/components/layout/PageShell';
 
 const EMPTY_SPEC: UpstreamSpec = {
   name: '',
@@ -155,20 +156,22 @@ export function RoutesPage() {
   };
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="text-xl font-semibold text-text-primary">Исходящие маршруты</h1>
-          <p className="text-sm text-text-secondary mt-1">
-            Куда прокси отправляет трафик наружу: напрямую, через SOCKS4/SOCKS5 (например WARP)
-            или через Shadowsocks. Вес задаёт долю трафика между включёнными маршрутами,
-            область — для каких запросов маршрут вообще применим. Это не то же самое, что
-            «Апстримы и DC» — там показаны дата-центры самого движка.
-          </p>
-        </div>
+    <PageShell title="Исходящие маршруты"
+      description={
+        <>
+        Куда прокси отправляет трафик наружу: напрямую, через SOCKS4/SOCKS5 (например WARP)
+        или через Shadowsocks. Вес задаёт долю трафика между включёнными маршрутами,
+        область — для каких запросов маршрут вообще применим. Это не то же самое, что
+        «Апстримы и DC» — там показаны дата-центры самого движка.
+          
+        </>
+      }
+      actions={
+        <>
         {allowed && <Button onClick={() => setAddOpen(true)}>Добавить маршрут</Button>}
-      </div>
-
+      
+        </>
+      }>
       {!modeLoading && !allowed && <ManagerOnlyNotice feature="Исходящие маршруты" />}
 
       {allowed && (
@@ -413,6 +416,7 @@ export function RoutesPage() {
         message={`Удалить маршрут «${deleteTarget?.name}»? Трафик перераспределится между остальными включёнными маршрутами.`}
         loading={deleting}
       />
-    </div>
+    
+    </PageShell>
   );
 }

@@ -6,7 +6,7 @@ const Table = React.forwardRef<HTMLTableElement, React.HTMLAttributes<HTMLTableE
     <div className="w-full overflow-auto">
       <table
         ref={ref}
-        className={cn('w-full caption-bottom text-[12.5px]', className)}
+        className={cn('w-full caption-bottom text-sm', className)}
         {...props}
       />
     </div>
@@ -49,7 +49,7 @@ const TableHead = React.forwardRef<HTMLTableCellElement, React.ThHTMLAttributes<
       ref={ref}
       className={cn(
         'h-9 px-[18px] text-left align-middle whitespace-nowrap',
-        'text-[10px] font-[640] uppercase tracking-[0.09em] text-text-secondary',
+        'text-2xs font-[640] uppercase tracking-[0.09em] text-text-secondary',
         className,
       )}
       {...props}

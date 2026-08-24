@@ -13,6 +13,7 @@ import { alertbotApi, tgbotApi, type AlertbotStatus, type TgbotStatus } from '@/
 import { ActiveBotCard } from '@/components/ActiveBotCard';
 import { AlertbotPanel } from '@/pages/AlertbotPage';
 import { cn } from '@/lib/utils';
+import { PageShell } from '@/components/layout/PageShell';
 
 const NOTIFY_LABELS: Array<[string, string]> = [
   ['availability', 'Доступность ниже порога'],
@@ -117,16 +118,14 @@ export function TgbotPage() {
 
   if (!supported) {
     return (
-      <div className="space-y-4">
-        <PageTitle />
+      <PageShell title="Телеграм-бот">
         <Card className="p-6 text-sm text-text-secondary">{message}</Card>
-      </div>
+      </PageShell>
     );
   }
 
   return (
-    <div className="space-y-4">
-      <PageTitle />
+    <PageShell title="Телеграм-бот">
       {/* Сначала — кто работает: с этим вопросом сюда и приходят. Ниже
           карточки обоих ботов подряд, чтобы не искать второго по вкладкам. */}
       <ActiveBotCard
@@ -415,16 +414,7 @@ export function TgbotPage() {
         перестал работать — снаружи или изнутри.
       </p>
       <AlertbotPanel onChanged={load} reloadSignal={botsChanged} />
-    </div>
-  );
-}
-
-function PageTitle() {
-  return (
-    <div className="flex items-center gap-2">
-      <Bot className="h-5 w-5 text-accent" />
-      <h1 className="text-xl font-semibold">Телеграм-бот</h1>
-    </div>
+    </PageShell>
   );
 }
 
@@ -494,6 +484,6 @@ function TimeRow({
           Сохранить
         </Button>
       </div>
-    </div>
+      </div>
   );
 }

@@ -7,6 +7,7 @@ import { useManagerOnly } from '@/hooks/useMtproxyl';
 import { Input } from '@/components/ui/input';
 import { useBranding } from '@/hooks/useBranding';
 import { brandingApi, mtproxylSettingsApi, type MtproxylSetting } from '@/lib/api';
+import { PageShell } from '@/components/layout/PageShell';
 
 /**
  * Настройки самого MTProxyL: в конфиг движка не попадают, поэтому им не место
@@ -82,16 +83,15 @@ export function MaintenancePage() {
   };
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-xl font-semibold text-text-primary">Обслуживание</h1>
-        <p className="text-sm text-text-secondary mt-1">
-          Настройки самого MTProxyL: в конфиг движка они не попадают. Глубина истории IP
-          работает в обоих режимах, хранение бэкапов — только в Manager, потому что
-          бэкапить чужую цель нечем.
-        </p>
-      </div>
-
+    <PageShell title="Обслуживание"
+      description={
+        <>
+        Настройки самого MTProxyL: в конфиг движка они не попадают. Глубина истории IP
+        работает в обоих режимах, хранение бэкапов — только в Manager, потому что
+        бэкапить чужую цель нечем.
+        
+        </>
+      }>
       <PanelNameCard />
 
       {error && <ErrorAlert message={error} onRetry={load} />}
@@ -143,7 +143,8 @@ export function MaintenancePage() {
           </div>
         </div>
       )}
-    </div>
+    
+    </PageShell>
   );
 }
 

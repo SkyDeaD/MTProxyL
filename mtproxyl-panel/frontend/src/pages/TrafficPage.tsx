@@ -3,7 +3,7 @@ import { ArrowDown, ArrowUp } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ErrorAlert } from '@/components/ErrorAlert';
 import { StatusBadge } from '@/components/StatusBadge';
-import { Header } from '@/components/layout/Header';
+import { PageShell } from '@/components/layout/PageShell';
 import { formatBytes } from '@/lib/utils';
 import { mtproxylNetApi, type TrafficReport, type TrafficUser } from '@/lib/api';
 import { StatsResetCard } from '@/components/StatsResetCard';
@@ -96,145 +96,141 @@ export function TrafficPage() {
   };
 
   return (
-    <div>
-      <Header title="Трафик" refreshing={loading} onRefresh={load} />
+    <PageShell title="Трафик" refreshing={loading} onRefresh={load}>
+      {error && <ErrorAlert message={error} onRetry={load} />}
 
-      <div className="p-4 lg:p-6 space-y-4">
-        {error && <ErrorAlert message={error} onRetry={load} />}
+      {report?.error && (
+        <div className="bg-warning/10 border border-warning/30 rounded-lg p-3 text-sm text-text-primary">
+          Статистика недоступна: {report.error}
+        </div>
+      )}
 
-        {report?.error && (
-          <div className="bg-warning/10 border border-warning/30 rounded-lg p-3 text-sm text-text-primary">
-            Статистика недоступна: {report.error}
-          </div>
-        )}
-
-        {loading && !report ? (
-          <div className="text-sm text-text-secondary">Загрузка…</div>
-        ) : (
-          report && (
-            <>
-              <Card>
-                <CardHeader>
-                  <CardTitle>Всего</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    {directional ? (
-                      <>
-                        <Metric
-                          label="Скачано"
-                          value={formatBytes(report.totals.in)}
-                          icon={<ArrowDown size={14} className="text-accent" />}
-                        />
-                        <Metric
-                          label="Отправлено"
-                          value={formatBytes(report.totals.out)}
-                          icon={<ArrowUp size={14} className="text-accent" />}
-                        />
-                      </>
-                    ) : (
-                      <Metric label="Передано" value={formatBytes(report.totals.total)} />
-                    )}
-                    <Metric label="Соединений" value={String(report.totals.connections)} />
-                    <Metric label="Уникальных IP" value={String(report.totals.unique_ips ?? 0)} />
-                    <Metric
-                      label="Пользователей"
-                      value={String(report.users.filter((u) => !u.deleted).length)}
-                    />
-                  </div>
-                  {report.persistent && directional && (
-                    <div className="text-xs text-text-secondary">
-                      За текущую сессию: ↓ {formatBytes(report.totals.session_in)} · ↑{' '}
-                      {formatBytes(report.totals.session_out)}
-                    </div>
-                  )}
-                  <p className="text-xs text-text-secondary/70">{sourceNote(report)}</p>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle>По пользователям</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {sorted.length === 0 ? (
-                    <div className="text-sm text-text-secondary">Данных пока нет</div>
+      {loading && !report ? (
+        <div className="text-sm text-text-secondary">Загрузка…</div>
+      ) : (
+        report && (
+          <>
+            <Card>
+              <CardHeader>
+                <CardTitle>Всего</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  {directional ? (
+                    <>
+                      <Metric
+                        label="Скачано"
+                        value={formatBytes(report.totals.in)}
+                        icon={<ArrowDown size={14} className="text-accent" />}
+                      />
+                      <Metric
+                        label="Отправлено"
+                        value={formatBytes(report.totals.out)}
+                        icon={<ArrowUp size={14} className="text-accent" />}
+                      />
+                    </>
                   ) : (
-                    <div className="overflow-x-auto -mx-4 px-4">
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr className="text-left text-text-secondary border-b border-border">
-                            <SortHeader
-                              label="Пользователь"
-                              k="user"
-                              sortKey={sortKey}
-                              asc={asc}
-                              onSort={toggleSort}
-                            />
-                            {directional && (
-                              <>
-                                <SortHeader
-                                  label="Скачано"
-                                  k="in"
-                                  sortKey={sortKey}
-                                  asc={asc}
-                                  onSort={toggleSort}
-                                  align="right"
-                                />
-                                <SortHeader
-                                  label="Отправлено"
-                                  k="out"
-                                  sortKey={sortKey}
-                                  asc={asc}
-                                  onSort={toggleSort}
-                                  align="right"
-                                />
-                              </>
-                            )}
-                            <SortHeader
-                              label="Всего"
-                              k="total"
-                              sortKey={sortKey}
-                              asc={asc}
-                              onSort={toggleSort}
-                              align="right"
-                            />
-                            <SortHeader
-                              label="Соед."
-                              k="connections"
-                              sortKey={sortKey}
-                              asc={asc}
-                              onSort={toggleSort}
-                              align="right"
-                            />
-                            <SortHeader
-                              label="Уник. IP"
-                              k="unique_ips"
-                              sortKey={sortKey}
-                              asc={asc}
-                              onSort={toggleSort}
-                              align="right"
-                            />
-                            <th className="py-2 pl-4 font-medium text-right">Состояние</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {sorted.map((u) => (
-                            <Row key={u.user} user={u} directional={directional} />
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                    <Metric label="Передано" value={formatBytes(report.totals.total)} />
                   )}
-                </CardContent>
-              </Card>
+                  <Metric label="Соединений" value={String(report.totals.connections)} />
+                  <Metric label="Уникальных IP" value={String(report.totals.unique_ips ?? 0)} />
+                  <Metric
+                    label="Пользователей"
+                    value={String(report.users.filter((u) => !u.deleted).length)}
+                  />
+                </div>
+                {report.persistent && directional && (
+                  <div className="text-xs text-text-secondary">
+                    За текущую сессию: ↓ {formatBytes(report.totals.session_in)} · ↑{' '}
+                    {formatBytes(report.totals.session_out)}
+                  </div>
+                )}
+                <p className="text-xs text-text-secondary/70">{sourceNote(report)}</p>
+              </CardContent>
+            </Card>
 
-              <StatsResetCard />
-            </>
-          )
-        )}
-      </div>
-    </div>
+            <Card>
+              <CardHeader>
+                <CardTitle>По пользователям</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {sorted.length === 0 ? (
+                  <div className="text-sm text-text-secondary">Данных пока нет</div>
+                ) : (
+                  <div className="overflow-x-auto -mx-4 px-4">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="text-left text-text-secondary border-b border-border">
+                          <SortHeader
+                            label="Пользователь"
+                            k="user"
+                            sortKey={sortKey}
+                            asc={asc}
+                            onSort={toggleSort}
+                          />
+                          {directional && (
+                            <>
+                              <SortHeader
+                                label="Скачано"
+                                k="in"
+                                sortKey={sortKey}
+                                asc={asc}
+                                onSort={toggleSort}
+                                align="right"
+                              />
+                              <SortHeader
+                                label="Отправлено"
+                                k="out"
+                                sortKey={sortKey}
+                                asc={asc}
+                                onSort={toggleSort}
+                                align="right"
+                              />
+                            </>
+                          )}
+                          <SortHeader
+                            label="Всего"
+                            k="total"
+                            sortKey={sortKey}
+                            asc={asc}
+                            onSort={toggleSort}
+                            align="right"
+                          />
+                          <SortHeader
+                            label="Соед."
+                            k="connections"
+                            sortKey={sortKey}
+                            asc={asc}
+                            onSort={toggleSort}
+                            align="right"
+                          />
+                          <SortHeader
+                            label="Уник. IP"
+                            k="unique_ips"
+                            sortKey={sortKey}
+                            asc={asc}
+                            onSort={toggleSort}
+                            align="right"
+                          />
+                          <th className="py-2 pl-4 font-medium text-right">Состояние</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sorted.map((u) => (
+                          <Row key={u.user} user={u} directional={directional} />
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <StatsResetCard />
+          </>
+        )
+      )}
+    </PageShell>
   );
 }
 

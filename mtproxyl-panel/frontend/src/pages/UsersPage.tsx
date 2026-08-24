@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo, useEffect } from 'react';
-import { Header } from '@/components/layout/Header';
+import { PageShell } from '@/components/layout/PageShell';
 import { ErrorAlert } from '@/components/ErrorAlert';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { UserFormDialog } from '@/components/UserFormDialog';
@@ -277,13 +277,11 @@ export function UsersPage() {
   }, [quotaUsers, refresh, refreshQuota]);
 
   return (
-    <div className="min-h-screen">
-      <Header title="Пользователи" refreshing={loading} onRefresh={refresh} />
-
-      <div className="p-4 lg:p-6 space-y-4">
+    <>
+      <PageShell title="Пользователи" refreshing={loading} onRefresh={refresh}>
         {error && <ErrorAlert message={error.message} onRetry={refresh} />}
         {actionError && <ErrorAlert message={actionError} />}
-
+  
         <div className="flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
           <div className="relative flex-1 max-w-sm">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary" />
@@ -292,7 +290,7 @@ export function UsersPage() {
               placeholder="Поиск пользователей…"
               value={search}
               onChange={(e) => handleSearchChange(e.target.value)}
-              className="w-full pl-9 pr-3 py-2 min-h-[44px] rounded-lg border border-border bg-surface text-sm text-text-primary placeholder:text-text-secondary focus:outline-none focus:ring-2 focus:ring-accent/50"
+              className="w-full pl-9 pr-3 py-2 min-h-[44px] glass rounded-card text-sm text-text-primary placeholder:text-text-secondary focus:outline-none focus:ring-2 focus:ring-accent/50"
             />
           </div>
           <div className="flex items-center gap-2">
@@ -310,7 +308,7 @@ export function UsersPage() {
             </Button>
           </div>
         </div>
-
+  
         {/* Mobile Sort Bar */}
         <div className="lg:hidden flex items-center justify-between gap-2 bg-surface p-2 sm:p-3 rounded-lg border border-border">
           <div className="flex items-center gap-2 flex-1 min-w-0">
@@ -338,7 +336,7 @@ export function UsersPage() {
             {sortDir === 'asc' ? <ArrowUp size={16} /> : <ArrowDown size={16} />}
           </button>
         </div>
-
+  
         {/* Desktop Table */}
         <div className="hidden lg:block border border-border rounded-lg overflow-hidden">
           <div className="overflow-x-auto">
@@ -348,39 +346,39 @@ export function UsersPage() {
                   <TableHead className="cursor-pointer select-none" onClick={() => toggleSort('username')}>
                     <span className="inline-flex items-center gap-1">
                       Имя
-                      {sortKey === 'username' ? (sortDir === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />) : <ArrowUpDown size={12} className="text-text-secondary/40" />}
+                      {sortKey === 'username' ? (sortDir === 'asc' ? <ArrowUp size={14} /> : <ArrowDown size={14} />) : <ArrowUpDown size={14} className="text-text-secondary/40" />}
                     </span>
                   </TableHead>
                   <TableHead>Ссылки</TableHead>
                   <TableHead className="cursor-pointer select-none" onClick={() => toggleSort('current_connections')}>
                     <span className="inline-flex items-center gap-1">
                       Соединения
-                      {sortKey === 'current_connections' ? (sortDir === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />) : <ArrowUpDown size={12} className="text-text-secondary/40" />}
+                      {sortKey === 'current_connections' ? (sortDir === 'asc' ? <ArrowUp size={14} /> : <ArrowDown size={14} />) : <ArrowUpDown size={14} className="text-text-secondary/40" />}
                     </span>
                   </TableHead>
                   <TableHead className="cursor-pointer select-none" onClick={() => toggleSort('active_unique_ips')}>
                     <span className="inline-flex items-center gap-1">
                       Активные IP
-                      {sortKey === 'active_unique_ips' ? (sortDir === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />) : <ArrowUpDown size={12} className="text-text-secondary/40" />}
+                      {sortKey === 'active_unique_ips' ? (sortDir === 'asc' ? <ArrowUp size={14} /> : <ArrowDown size={14} />) : <ArrowUpDown size={14} className="text-text-secondary/40" />}
                     </span>
                   </TableHead>
                   <TableHead className="cursor-pointer select-none" onClick={() => toggleSort('total_octets')}>
                     <span className="inline-flex items-center gap-1">
                       Трафик (сессия)
-                      {sortKey === 'total_octets' ? (sortDir === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />) : <ArrowUpDown size={12} className="text-text-secondary/40" />}
+                      {sortKey === 'total_octets' ? (sortDir === 'asc' ? <ArrowUp size={14} /> : <ArrowDown size={14} />) : <ArrowUpDown size={14} className="text-text-secondary/40" />}
                     </span>
                   </TableHead>
                   <TableHead className="cursor-pointer select-none" onClick={() => toggleSort('total_bytes')}>
                     <span className="inline-flex items-center gap-1">
                       Накоплено
-                      {sortKey === 'total_bytes' ? (sortDir === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />) : <ArrowUpDown size={12} className="text-text-secondary/40" />}
+                      {sortKey === 'total_bytes' ? (sortDir === 'asc' ? <ArrowUp size={14} /> : <ArrowDown size={14} />) : <ArrowUpDown size={14} className="text-text-secondary/40" />}
                     </span>
                   </TableHead>
                   <TableHead>Квота</TableHead>
                   <TableHead className="cursor-pointer select-none" onClick={() => toggleSort('expiration_rfc3339')}>
                     <span className="inline-flex items-center gap-1">
                       Срок действия
-                      {sortKey === 'expiration_rfc3339' ? (sortDir === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />) : <ArrowUpDown size={12} className="text-text-secondary/40" />}
+                      {sortKey === 'expiration_rfc3339' ? (sortDir === 'asc' ? <ArrowUp size={14} /> : <ArrowDown size={14} />) : <ArrowUpDown size={14} className="text-text-secondary/40" />}
                     </span>
                   </TableHead>
                   <TableHead className="text-right">Действия</TableHead>
@@ -396,7 +394,7 @@ export function UsersPage() {
                 ) : (
                   pagedUsers.map((u) => {
                     const hasConns = u.current_connections > 0;
-
+  
                     return (
                       <TableRow key={u.username} className={hasConns ? 'bg-success/5 hover:bg-success/10' : ''}>
                         <TableCell className="font-medium">
@@ -469,11 +467,11 @@ export function UsersPage() {
             </Table>
           </div>
         </div>
-
+  
         {/* Mobile Cards */}
         <div className="lg:hidden space-y-3">
           {pagedUsers.length === 0 ? (
-            <div className="text-center text-text-secondary py-8 bg-surface border border-border rounded-lg">
+            <div className="text-center text-text-secondary py-8 bg-surface-hover border border-border rounded-lg">
               {search ? 'Пользователи не найдены' : 'Пользователи не заданы'}
             </div>
           ) : (
@@ -503,7 +501,7 @@ export function UsersPage() {
             })
           )}
         </div>
-
+  
         {/* Pagination */}
         {sortedUsers.length > 0 && (
           <div className="flex flex-col sm:flex-row items-center justify-between gap-3 text-sm text-text-secondary">
@@ -539,8 +537,8 @@ export function UsersPage() {
             </div>
           </div>
         )}
-      </div>
-
+        
+      </PageShell>
       <UserFormDialog
         open={createOpen}
         onClose={() => setCreateOpen(false)}
@@ -591,6 +589,7 @@ export function UsersPage() {
         confirmVariant="default"
         loading={resettingAll}
       />
-    </div>
+    
+    </>
   );
 }

@@ -56,7 +56,7 @@ export function AvailabilityCard() {
   if (!enabled && !loading) return null;
 
   return (
-    <div className="bg-surface border border-border rounded-lg p-4">
+    <div className="glass rounded-card p-4">
       <div className="flex items-center justify-between mb-3">
         <span className="text-xs text-text-secondary uppercase tracking-wider">
           Доступность из РФ

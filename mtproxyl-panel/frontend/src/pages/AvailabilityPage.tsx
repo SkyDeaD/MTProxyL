@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { RefreshCw, ChevronDown, ChevronUp, CheckCircle2, XCircle, ExternalLink, Target } from 'lucide-react';
-import { Header } from '@/components/layout/Header';
+import { PageShell } from '@/components/layout/PageShell';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -83,113 +83,109 @@ export function AvailabilityPage() {
   };
 
   return (
-    <div>
-      <Header title="Доступность из России" refreshing={loading} onRefresh={load} />
-
-      <div className="p-4 lg:p-6 space-y-4 lg:space-y-6">
-        <div className="flex items-start justify-between gap-4 flex-wrap">
-          <p className="text-sm text-text-secondary max-w-2xl">
-            Проверка через{' '}
-            <a
-              href="https://globalping.io"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-accent hover:underline"
-            >
-              Globalping API
-            </a>{' '}
-            — HTTPS HEAD запросы с российских резидентских (eyeball) зондов.
-            Критерий успеха — получение TLS-сертификата, то же рукопожатие,
-            что делает клиент Telegram.
-          </p>
-          <Button onClick={check} disabled={checking || !enabled} className="gap-2 shrink-0">
-            <RefreshCw size={14} className={cn(checking && 'animate-spin')} />
-            {checking ? 'Проверяем…' : 'Проверить сейчас'}
-          </Button>
-        </div>
-
-        {error && <ErrorAlert message={error} onRetry={load} />}
-
-        {enabled && (
-          <AutoCheckToggle enabled={autoCheck} schedule={schedule} onChange={setAutoCheck} />
-        )}
-
-        {enabled && <QuotaBanner quota={quota} />}
-
-        {enabled && <TokenForm hasToken={quota?.has_token ?? false} onSaved={load} />}
-
-        {enabled && <TargetForm onSaved={load} />}
-
-        {!enabled ? (
-          <Card className="p-6 text-sm text-text-secondary">
-            {message || 'Проверка доступности недоступна'}
-          </Card>
-        ) : !result ? (
-          <Card className="p-6 text-sm text-text-secondary text-center">
-            {message || 'Проверки ещё не проводились'}
-          </Card>
-        ) : (
-          <>
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
-              <StatCard
-                label="Доступность"
-                value={`${result.percentage.toFixed(0)}%`}
-                valueClass={LEVEL_TEXT_CLASS[result.level]}
-                extra={
-                  <span className={cn('text-xs', LEVEL_TEXT_CLASS[result.level])}>
-                    {LEVEL_LABEL[result.level]}
-                  </span>
-                }
-              />
-              <StatCard
-                label="Успешные зонды"
-                value={`${result.success_probes} / ${result.total_probes}`}
-              />
-              <StatCard label="Цель проверки" value={result.target} small />
-              <StatCard
-                label="Время проверки"
-                value={new Date(result.checked_at).toLocaleString('ru-RU')}
-                small
-                extra={
-                  result.measurement_id ? (
-                    <a
-                      href={`https://api.globalping.io/v1/measurements/${result.measurement_id}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-xs text-accent hover:underline flex items-center gap-1"
-                    >
-                      JSON в Globalping <ExternalLink size={12} />
-                    </a>
-                  ) : undefined
-                }
-              />
-            </div>
-
-            {result.error && <ErrorAlert message={result.error} />}
-
-            {result.probes && result.probes.length > 0 && (
-              <Card className="overflow-hidden">
-                <div className="p-4 border-b border-border">
-                  <h3 className="text-sm font-medium text-text-primary">
-                    Результаты по зондам ({result.probes.length})
-                  </h3>
-                </div>
-                <div className="divide-y divide-border">
-                  {result.probes.map((probe, idx) => (
-                    <ProbeRow
-                      key={idx}
-                      probe={probe}
-                      expanded={expanded === idx}
-                      onToggle={() => setExpanded(expanded === idx ? null : idx)}
-                    />
-                  ))}
-                </div>
-              </Card>
-            )}
-          </>
-        )}
+    <PageShell title="Доступность из России" refreshing={loading} onRefresh={load}>
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <p className="text-sm text-text-secondary max-w-2xl">
+          Проверка через{' '}
+          <a
+            href="https://globalping.io"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-accent hover:underline"
+          >
+            Globalping API
+          </a>{' '}
+          — HTTPS HEAD запросы с российских резидентских (eyeball) зондов.
+          Критерий успеха — получение TLS-сертификата, то же рукопожатие,
+          что делает клиент Telegram.
+        </p>
+        <Button onClick={check} disabled={checking || !enabled} className="gap-2 shrink-0">
+          <RefreshCw size={14} className={cn(checking && 'animate-spin')} />
+          {checking ? 'Проверяем…' : 'Проверить сейчас'}
+        </Button>
       </div>
-    </div>
+
+      {error && <ErrorAlert message={error} onRetry={load} />}
+
+      {enabled && (
+        <AutoCheckToggle enabled={autoCheck} schedule={schedule} onChange={setAutoCheck} />
+      )}
+
+      {enabled && <QuotaBanner quota={quota} />}
+
+      {enabled && <TokenForm hasToken={quota?.has_token ?? false} onSaved={load} />}
+
+      {enabled && <TargetForm onSaved={load} />}
+
+      {!enabled ? (
+        <Card className="p-6 text-sm text-text-secondary">
+          {message || 'Проверка доступности недоступна'}
+        </Card>
+      ) : !result ? (
+        <Card className="p-6 text-sm text-text-secondary text-center">
+          {message || 'Проверки ещё не проводились'}
+        </Card>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
+            <StatCard
+              label="Доступность"
+              value={`${result.percentage.toFixed(0)}%`}
+              valueClass={LEVEL_TEXT_CLASS[result.level]}
+              extra={
+                <span className={cn('text-xs', LEVEL_TEXT_CLASS[result.level])}>
+                  {LEVEL_LABEL[result.level]}
+                </span>
+              }
+            />
+            <StatCard
+              label="Успешные зонды"
+              value={`${result.success_probes} / ${result.total_probes}`}
+            />
+            <StatCard label="Цель проверки" value={result.target} small />
+            <StatCard
+              label="Время проверки"
+              value={new Date(result.checked_at).toLocaleString('ru-RU')}
+              small
+              extra={
+                result.measurement_id ? (
+                  <a
+                    href={`https://api.globalping.io/v1/measurements/${result.measurement_id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-accent hover:underline flex items-center gap-1"
+                  >
+                    JSON в Globalping <ExternalLink size={14} />
+                  </a>
+                ) : undefined
+              }
+            />
+          </div>
+
+          {result.error && <ErrorAlert message={result.error} />}
+
+          {result.probes && result.probes.length > 0 && (
+            <Card className="overflow-hidden">
+              <div className="p-4 border-b border-border">
+                <h3 className="text-sm font-medium text-text-primary">
+                  Результаты по зондам ({result.probes.length})
+                </h3>
+              </div>
+              <div className="divide-y divide-border">
+                {result.probes.map((probe, idx) => (
+                  <ProbeRow
+                    key={idx}
+                    probe={probe}
+                    expanded={expanded === idx}
+                    onToggle={() => setExpanded(expanded === idx ? null : idx)}
+                  />
+                ))}
+              </div>
+            </Card>
+          )}
+        </>
+      )}
+    </PageShell>
   );
 }
 
@@ -253,7 +249,7 @@ function AutoCheckToggle({
   };
 
   return (
-    <div className="flex items-center justify-between gap-3 bg-surface border border-border rounded-lg p-3 flex-wrap">
+    <div className="flex items-center justify-between gap-3 glass rounded-card p-3 flex-wrap">
       <div className="text-sm">
         <span className="text-text-primary">Автопроверка</span>
         <span className={cn('ml-2 font-medium', enabled ? 'text-success' : 'text-text-secondary')}>
@@ -534,7 +530,7 @@ function StatCard({
   extra?: React.ReactNode;
 }) {
   return (
-    <div className="bg-surface border border-border rounded-lg p-3 lg:p-4 min-h-[44px] flex flex-col justify-center">
+    <div className="bg-surface-hover border border-border rounded-lg p-3 lg:p-4 min-h-[44px] flex flex-col justify-center">
       <span className="text-xs lg:text-sm text-text-secondary mb-1.5 lg:mb-2">{label}</span>
       <div
         className={cn(small ? 'text-sm truncate' : 'text-xl lg:text-2xl font-bold', valueClass)}

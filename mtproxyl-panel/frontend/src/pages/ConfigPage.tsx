@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
-import { Settings, Save, RotateCw, X, Info, AlertTriangle } from 'lucide-react';
+import { Save, RotateCw, X, Info, AlertTriangle } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { panelApi } from '@/lib/api';
 import { QuickSettingsTab } from '@/components/config/QuickSettingsTab';
 import { AdvancedEditorTab } from '@/components/config/AdvancedEditorTab';
 import { useMtproxyl } from '@/hooks/useMtproxyl';
+import { PageShell } from '@/components/layout/PageShell';
 
 type Tab = 'quick' | 'advanced';
 
@@ -135,22 +136,59 @@ export function ConfigPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-full">
+      <PageShell title="Конфигурация">
         <div className="text-text-secondary">Загрузка конфигурации…</div>
-      </div>
+      </PageShell>
     );
   }
 
   if (error && !currentContent) {
     return (
-      <div className="flex items-center justify-center h-full">
+      <PageShell title="Конфигурация">
         <div className="text-danger">{error}</div>
-      </div>
+      </PageShell>
     );
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <PageShell
+      title="Конфигурация"
+      description={<span className="mono">{configPath}</span>}
+      actions={
+        <>
+          {hasChanges && (
+            <button
+              onClick={handleDiscard}
+              disabled={saving}
+              className="px-3 py-1.5 text-sm rounded-lg border border-border hover:bg-surface-hover transition-colors flex items-center gap-2"
+            >
+              <X className="w-4 h-4" />
+              Отменить
+            </button>
+          )}
+
+          <button
+            onClick={() => handleSave(false)}
+            disabled={!hasChanges || saving || configOwnedByMtproxyl}
+            className="px-3 py-1.5 text-sm rounded-lg bg-primary text-white hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+          >
+            <Save className="w-4 h-4" />
+            {saving ? 'Сохранение…' : 'Сохранить'}
+          </button>
+
+          <button
+            onClick={() => handleSave(true)}
+            disabled={!hasChanges || saving || configOwnedByMtproxyl}
+            className="px-3 py-1.5 text-sm rounded-lg bg-orange-600 text-white hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+          >
+            <RotateCw className="w-4 h-4" />
+            {saving ? 'Сохранение…' : 'Сохранить и перезапустить'}
+          </button>
+        
+        </>
+      }
+      fullHeight
+    >
       {configOwnedByMtproxyl && (
         <div className="px-4 py-3 bg-warning/10 border-b border-warning/30 text-sm flex items-start gap-2">
           <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-warning" />
@@ -206,47 +244,6 @@ export function ConfigPage() {
           </div>
         </div>
       )}
-      {/* Header */}
-      <div className="flex flex-col gap-3 p-4 border-b border-border sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-3 min-w-0">
-          <Settings className="w-5 h-5 text-primary shrink-0" />
-          <div className="min-w-0">
-            <h1 className="text-lg font-semibold text-text-primary">Конфигурация Telemt</h1>
-            <p className="text-sm text-text-secondary truncate">{configPath}</p>
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2 shrink-0">
-          {hasChanges && (
-            <button
-              onClick={handleDiscard}
-              disabled={saving}
-              className="px-3 py-1.5 text-sm rounded-lg border border-border hover:bg-surface-hover transition-colors flex items-center gap-2"
-            >
-              <X className="w-4 h-4" />
-              Отменить
-            </button>
-          )}
-
-          <button
-            onClick={() => handleSave(false)}
-            disabled={!hasChanges || saving || configOwnedByMtproxyl}
-            className="px-3 py-1.5 text-sm rounded-lg bg-primary text-white hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
-          >
-            <Save className="w-4 h-4" />
-            {saving ? 'Сохранение…' : 'Сохранить'}
-          </button>
-
-          <button
-            onClick={() => handleSave(true)}
-            disabled={!hasChanges || saving || configOwnedByMtproxyl}
-            className="px-3 py-1.5 text-sm rounded-lg bg-orange-600 text-white hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
-          >
-            <RotateCw className="w-4 h-4" />
-            {saving ? 'Сохранение…' : 'Сохранить и перезапустить'}
-          </button>
-        </div>
-      </div>
 
       {/* Tabs */}
       <div className="flex border-b border-border">
@@ -293,6 +290,6 @@ export function ConfigPage() {
           Есть несохранённые изменения
         </div>
       )}
-    </div>
+    </PageShell>
   );
 }

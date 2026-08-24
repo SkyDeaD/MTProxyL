@@ -71,7 +71,7 @@ export function MtproxylUpdateCard() {
             'disabled:opacity-50 disabled:cursor-not-allowed',
           )}
         >
-          <RefreshCw size={12} className={cn('lg:w-3.5 lg:h-3.5', loading && 'animate-spin')} />
+          <RefreshCw size={14} className={cn('lg:w-3.5 lg:h-3.5', loading && 'animate-spin')} />
           Проверить
         </button>
       </div>

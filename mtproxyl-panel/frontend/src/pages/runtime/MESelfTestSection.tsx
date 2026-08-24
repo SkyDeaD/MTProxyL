@@ -224,19 +224,19 @@ export function MESelfTestSection({ data }: MESelfTestSectionProps) {
                 {u.bnd && (
                   <div className="flex flex-wrap gap-2 mt-2">
                     <span className={cn(
-                      'text-[10px] font-medium px-2 py-0.5 rounded',
+                      'text-2xs font-medium px-2 py-0.5 rounded',
                       u.bnd.addr_state === 'ok' ? 'bg-success/10 text-success' : 'bg-danger/10 text-danger'
                     )}>
                       addr: {u.bnd.addr_state}
                     </span>
                     <span className={cn(
-                      'text-[10px] font-medium px-2 py-0.5 rounded',
+                      'text-2xs font-medium px-2 py-0.5 rounded',
                       u.bnd.port_state === 'ok' ? 'bg-success/10 text-success' : 'bg-danger/10 text-danger'
                     )}>
                       port: {u.bnd.port_state}
                     </span>
                     {u.bnd.last_addr && (
-                      <span className="text-[10px] text-text-secondary px-2 py-0.5">
+                      <span className="text-2xs text-text-secondary px-2 py-0.5">
                         last: <span className="text-text-primary font-mono">{u.bnd.last_addr}</span>
                       </span>
                     )}

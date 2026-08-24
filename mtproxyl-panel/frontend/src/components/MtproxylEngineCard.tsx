@@ -78,7 +78,7 @@ export function MtproxylEngineCard() {
             'disabled:opacity-50 disabled:cursor-not-allowed',
           )}
         >
-          <RefreshCw size={12} className={cn('lg:w-3.5 lg:h-3.5', loading && 'animate-spin')} />
+          <RefreshCw size={14} className={cn('lg:w-3.5 lg:h-3.5', loading && 'animate-spin')} />
           Обновить список
         </button>
       </div>
@@ -132,7 +132,7 @@ export function MtproxylEngineCard() {
                         'disabled:opacity-40 disabled:cursor-not-allowed',
                       )}
                     >
-                      <Download size={12} />
+                      <Download size={14} />
                       Поставить
                     </button>
                   </div>
@@ -182,7 +182,7 @@ export function MtproxylEngineCard() {
                 'disabled:opacity-50 disabled:cursor-not-allowed',
               )}
             >
-              <Undo2 size={12} />
+              <Undo2 size={14} />
               Откатить на {rollbackTargets[0]}
             </button>
           ) : (
@@ -198,7 +198,7 @@ export function MtproxylEngineCard() {
                     'disabled:opacity-50 disabled:cursor-not-allowed',
                   )}
                 >
-                  <Undo2 size={12} />
+                  <Undo2 size={14} />
                   {v}
                 </button>
               ))}

@@ -1,4 +1,4 @@
-import { Header } from '@/components/layout/Header';
+import { PageShell } from '@/components/layout/PageShell';
 import { MetricCard } from '@/components/MetricCard';
 import { StatusDot } from '@/components/StatusDot';
 import { StatusBadge } from '@/components/StatusBadge';
@@ -100,136 +100,131 @@ export function DashboardPage() {
   const dcThreshold = useDcThreshold();
 
   return (
-    <div>
-      <Header title="Дашборд" refreshing={!connected} onRefresh={refresh} />
+    <PageShell title="Дашборд" refreshing={!connected} onRefresh={refresh}>
+      {firstError && <ErrorAlert message={firstError} onRetry={refresh} />}
 
-      <div className="p-4 lg:p-6 space-y-4 lg:space-y-6">
-        {firstError && <ErrorAlert message={firstError} onRetry={refresh} />}
+      <MtproxylUpdateBanner />
 
-        <MtproxylUpdateBanner />
-
-        {/* Health Banner */}
-        <div
-          className={`rounded-lg border p-3 lg:p-4 flex items-center gap-2 lg:gap-3 text-sm lg:text-base ${
-            isHealthy
-              ? 'bg-success/10 border-success/30'
-              : 'bg-danger/10 border-danger/30'
-          }`}
-        >
-          <StatusDot
-            status={isHealthy ? 'ok' : 'error'}
-            size="md"
-            animated={!connected}
-          />
-          <span className={`font-medium ${isHealthy ? 'text-success' : 'text-danger'}`}>
-            {isHealthy ? 'Telemt работает' : 'Telemt недоступен'}
+      {/* Health Banner */}
+      <div
+        className={`rounded-lg border p-3 lg:p-4 flex items-center gap-2 lg:gap-3 text-sm lg:text-base ${
+          isHealthy
+            ? 'bg-success/10 border-success/30'
+            : 'bg-danger/10 border-danger/30'
+        }`}
+      >
+        <StatusDot
+          status={isHealthy ? 'ok' : 'error'}
+          size="md"
+          animated={!connected}
+        />
+        <span className={`font-medium ${isHealthy ? 'text-success' : 'text-danger'}`}>
+          {isHealthy ? 'Telemt работает' : 'Telemt недоступен'}
+        </span>
+        {!connected && (
+          <span className="ml-auto text-xs text-warning bg-warning/15 px-2 py-1 rounded shrink-0">
+            Переподключение WS…
           </span>
-          {!connected && (
-            <span className="ml-auto text-xs text-warning bg-warning/15 px-2 py-1 rounded shrink-0">
-              Переподключение WS…
-            </span>
-          )}
-          {health?.read_only && (
-            <span className="ml-auto text-xs text-warning bg-warning/15 px-2 py-1 rounded shrink-0">
-              ТОЛЬКО ЧТЕНИЕ
-            </span>
-          )}
-        </div>
-
-        <AvailabilityCard />
-
-        {/* Startup Status */}
-        {gates && (
-          <StartupStatus
-            status={gates.startup_status}
-            stage={gates.startup_stage}
-            progressPct={gates.startup_progress_pct}
-          />
         )}
-
-        {/* Запуск/перезапуск/остановка движка — только при включённом мосте
-            MTProxyL: он знает, контейнер это или чужая цель. */}
-        <ProxyControls />
-
-        {/* Metric Cards */}
-        {summary && (
-          <div className="grid grid-cols-2 lg:grid-cols-6 gap-3 lg:gap-4">
-            <MetricCard
-              label="Время работы"
-              value={formatUptime(summary.uptime_seconds)}
-              icon={<Clock size={14} className="lg:w-4 lg:h-4" />}
-            />
-            <MetricCard
-              label="Всего соединений"
-              value={formatNumber(summary.connections_total)}
-              icon={<Activity size={14} className="lg:w-4 lg:h-4" />}
-              variant="success"
-            />
-            <MetricCard
-              label="Ошибочных соединений"
-              value={formatNumber(summary.connections_bad_total)}
-              variant={summary.connections_bad_total > 0 ? 'warning' : 'default'}
-              status={summary.connections_bad_total > 0 ? 'warn' : 'ok'}
-            />
-            <MetricCard
-              label="Пользователей"
-              value={summary.configured_users}
-              icon={<Users size={14} className="lg:w-4 lg:h-4" />}
-            />
-            <MetricCard
-              label="Активных IP"
-              value={formatNumber(totalActiveIPs)}
-              icon={<Globe size={14} className="lg:w-4 lg:h-4" />}
-            />
-            <MetricCard
-              label="Всего трафика"
-              value={formatBytes(totalTraffic)}
-              icon={<ArrowUpDown size={14} className="lg:w-4 lg:h-4" />}
-            />
-          </div>
+        {health?.read_only && (
+          <span className="ml-auto text-xs text-warning bg-warning/15 px-2 py-1 rounded shrink-0">
+            ТОЛЬКО ЧТЕНИЕ
+          </span>
         )}
-
-        {/* Connection Errors breakdown */}
-        {summary && (
-          <ConnectionErrors
-            badByClass={summary.connections_bad_by_class}
-            handshakeFailuresByClass={summary.handshake_failures_by_class}
-          />
-        )}
-
-        {/* Дата-центры Telegram: связь движка с Telegram, а не доступность
-            прокси снаружи. Числа те же, что показывает `mtproxyl dc`. */}
-        {dcs && (
-          <DcCard
-            data={dcs}
-            threshold={dcThreshold.value}
-            editable={dcThreshold.editable}
-            onSave={dcThreshold.save}
-          />
-        )}
-
-        {/* System Info */}
-        {system && (
-          <CollapsibleSection title="Информация о системе">
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-2 lg:gap-3">
-              {Object.entries(system).map(([key, value]) => {
-                const { label, text, hint } = describeSystemField(key, value);
-                return (
-                  <div key={key} className="min-w-0">
-                    <div className="text-xs text-text-secondary">{label}</div>
-                    <div className="text-xs lg:text-sm text-text-primary truncate" title={String(value ?? '')}>
-                      {typeof value === 'boolean' ? <StatusBadge status={value} /> : text}
-                    </div>
-                    {hint && <div className="text-[11px] text-text-secondary/70">{hint}</div>}
-                  </div>
-                );
-              })}
-            </div>
-          </CollapsibleSection>
-        )}
-
       </div>
-    </div>
+
+      <AvailabilityCard />
+
+      {/* Startup Status */}
+      {gates && (
+        <StartupStatus
+          status={gates.startup_status}
+          stage={gates.startup_stage}
+          progressPct={gates.startup_progress_pct}
+        />
+      )}
+
+      {/* Запуск/перезапуск/остановка движка — только при включённом мосте
+          MTProxyL: он знает, контейнер это или чужая цель. */}
+      <ProxyControls />
+
+      {/* Metric Cards */}
+      {summary && (
+        <div className="grid grid-cols-2 lg:grid-cols-6 gap-3 lg:gap-4">
+          <MetricCard
+            label="Время работы"
+            value={formatUptime(summary.uptime_seconds)}
+            icon={<Clock size={14} className="lg:w-4 lg:h-4" />}
+          />
+          <MetricCard
+            label="Всего соединений"
+            value={formatNumber(summary.connections_total)}
+            icon={<Activity size={14} className="lg:w-4 lg:h-4" />}
+            variant="success"
+          />
+          <MetricCard
+            label="Ошибочных соединений"
+            value={formatNumber(summary.connections_bad_total)}
+            variant={summary.connections_bad_total > 0 ? 'warning' : 'default'}
+            status={summary.connections_bad_total > 0 ? 'warn' : 'ok'}
+          />
+          <MetricCard
+            label="Пользователей"
+            value={summary.configured_users}
+            icon={<Users size={14} className="lg:w-4 lg:h-4" />}
+          />
+          <MetricCard
+            label="Активных IP"
+            value={formatNumber(totalActiveIPs)}
+            icon={<Globe size={14} className="lg:w-4 lg:h-4" />}
+          />
+          <MetricCard
+            label="Всего трафика"
+            value={formatBytes(totalTraffic)}
+            icon={<ArrowUpDown size={14} className="lg:w-4 lg:h-4" />}
+          />
+        </div>
+      )}
+
+      {/* Connection Errors breakdown */}
+      {summary && (
+        <ConnectionErrors
+          badByClass={summary.connections_bad_by_class}
+          handshakeFailuresByClass={summary.handshake_failures_by_class}
+        />
+      )}
+
+      {/* Дата-центры Telegram: связь движка с Telegram, а не доступность
+          прокси снаружи. Числа те же, что показывает `mtproxyl dc`. */}
+      {dcs && (
+        <DcCard
+          data={dcs}
+          threshold={dcThreshold.value}
+          editable={dcThreshold.editable}
+          onSave={dcThreshold.save}
+        />
+      )}
+
+      {/* System Info */}
+      {system && (
+        <CollapsibleSection title="Информация о системе">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-2 lg:gap-3">
+            {Object.entries(system).map(([key, value]) => {
+              const { label, text, hint } = describeSystemField(key, value);
+              return (
+                <div key={key} className="min-w-0">
+                  <div className="text-xs text-text-secondary">{label}</div>
+                  <div className="text-xs lg:text-sm text-text-primary truncate" title={String(value ?? '')}>
+                    {typeof value === 'boolean' ? <StatusBadge status={value} /> : text}
+                  </div>
+                  {hint && <div className="text-xs text-text-secondary/70">{hint}</div>}
+                </div>
+              );
+            })}
+          </div>
+        </CollapsibleSection>
+      )}
+    </PageShell>
   );
 }
 
@@ -417,7 +412,7 @@ function DcThresholdForm({
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         inputMode="numeric"
-        className="w-20 h-8"
+        className="w-20 h-7"
       />
       <Button onClick={submit} disabled={saving || draft === String(threshold)} size="sm" variant="outline">
         {saving ? 'Сохраняем…' : 'Сохранить'}

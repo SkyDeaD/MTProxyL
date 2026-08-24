@@ -11,6 +11,7 @@ import { useManagerOnly } from '@/hooks/useMtproxyl';
 import { useTheme } from '@/hooks/useTheme';
 import { mtproxylExpertApi, type SuperExpertStatus } from '@/lib/api';
 import { formatBytes } from '@/lib/utils';
+import { PageShell } from '@/components/layout/PageShell';
 
 // Запасной текст на случай, когда конфига нет вовсе. Обычно редактор
 // заполняется действующим конфигом — его же копирует включение режима.
@@ -105,15 +106,14 @@ export function SuperExpertPage() {
   };
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-xl font-semibold text-text-primary">Супер эксперт</h1>
-        <p className="text-sm text-text-secondary mt-1">
-          Конфигурация движка целиком под вашим контролем: MTProxyL перестаёт её генерировать и
-          подставляет ваш файл при каждом запуске.
-        </p>
-      </div>
-
+    <PageShell title="Супер эксперт"
+      description={
+        <>
+        Конфигурация движка целиком под вашим контролем: MTProxyL перестаёт её генерировать и
+        подставляет ваш файл при каждом запуске.
+        
+        </>
+      }>
       {!modeLoading && !allowed && <ManagerOnlyNotice feature="Режим супер эксперта" />}
 
       {allowed && (
@@ -242,7 +242,8 @@ export function SuperExpertPage() {
         confirmVariant={confirmToggle ? 'default' : 'danger'}
         loading={toggling}
       />
-    </div>
+    
+    </PageShell>
   );
 }
 

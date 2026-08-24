@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useLogStream } from '@/hooks/useLogStream';
 import { parseLogLineParts, type LogPartKind } from '@/pages/logsPage.helpers';
 import { Play, Square, Pause, Download, Trash2, Search } from 'lucide-react';
+import { PageShell } from '@/components/layout/PageShell';
 
 interface LogSourceStatus {
   available: boolean;
@@ -178,37 +179,35 @@ export function LogsPage() {
 
   if (statusLoading) {
     return (
-      <div className="p-6">
-        <h1 className="text-xl font-semibold text-text-primary mb-4">Логи</h1>
+      <PageShell title="Логи">
         <div className="text-text-secondary">Loading...</div>
-      </div>
+      </PageShell>
     );
   }
 
   if (status && !status.available) {
     return (
-      <div className="p-6">
-        <h1 className="text-xl font-semibold text-text-primary mb-4">Логи</h1>
+      <PageShell title="Логи">
         <div className="bg-danger/10 border border-danger/30 rounded-lg p-4 text-sm text-danger">
           <div className="font-medium mb-1">Источник логов недоступен</div>
           <div>{status.error}</div>
         </div>
-      </div>
+      </PageShell>
     );
   }
 
   return (
-    <div className="p-6 flex flex-col h-[calc(100vh-var(--header-height,64px))]">
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-3">
-          <h1 className="text-xl font-semibold text-text-primary">Логи</h1>
-          {status && (
-            <span className="text-xs px-2 py-1 rounded bg-surface-secondary text-text-secondary">
-              {status.source}: {status.target}
-            </span>
-          )}
-        </div>
-      </div>
+    <PageShell
+      title="Логи"
+      fullHeight
+      actions={
+        status && (
+          <span className="text-xs px-2 py-1 rounded-sm bg-surface-hover text-text-secondary">
+            {status.source}: {status.target}
+          </span>
+        )
+      }
+    >
 
       {/* Controls */}
       <div className="flex items-center gap-2 mb-3 flex-wrap">
@@ -330,6 +329,6 @@ export function LogsPage() {
           New lines ↓
         </button>
       )}
-    </div>
+    </PageShell>
   );
 }

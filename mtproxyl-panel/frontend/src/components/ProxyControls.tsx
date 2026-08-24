@@ -56,7 +56,7 @@ export function ProxyControls() {
   const down = status?.running === false;
 
   return (
-    <div className="bg-surface border border-border rounded-lg p-4 space-y-3">
+    <div className="glass rounded-card p-4 space-y-3">
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
           <h3 className="text-sm font-medium text-text-secondary">

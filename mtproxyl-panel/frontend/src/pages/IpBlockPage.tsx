@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ErrorAlert } from '@/components/ErrorAlert';
 import { mtproxylNetApi, type IpBlockStatus, type IpBlockHit } from '@/lib/api';
+import { PageShell } from '@/components/layout/PageShell';
 
 /** Адрес или подсеть: IPv4 с маской 0-32, IPv6 с маской 0-128. */
 export function validateEntry(raw: string): string | null {
@@ -119,15 +120,14 @@ export function IpBlockPage() {
   const hitFor = (e: string) => hits.find((h) => h.entry === e || h.entry === e.replace(/\/32$/, ''));
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-xl font-semibold text-text-primary">Блокировка IP адресов</h1>
-        <p className="text-sm text-text-secondary mt-1">
-          Адреса и подсети из списка не доходят до сервера — правила живут в nftables.
-          Список хранится файлом, его можно выгрузить и перенести на другой сервер.
-        </p>
-      </div>
-
+    <PageShell title="Блокировка IP адресов"
+      description={
+        <>
+        Адреса и подсети из списка не доходят до сервера — правила живут в nftables.
+        Список хранится файлом, его можно выгрузить и перенести на другой сервер.
+        
+        </>
+      }>
       {error && <ErrorAlert message={error} onRetry={load} />}
 
       <Card>
@@ -305,6 +305,7 @@ export function IpBlockPage() {
           )}
         </CardContent>
       </Card>
-    </div>
+    
+    </PageShell>
   );
 }

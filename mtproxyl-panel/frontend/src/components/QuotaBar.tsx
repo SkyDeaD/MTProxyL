@@ -21,7 +21,7 @@ export function QuotaBar({ used, limit, className }: QuotaBarProps) {
         <div className="h-1.5 flex-1 rounded-full bg-border overflow-hidden">
           <div className={cn('h-full rounded-full', barColor)} style={{ width: `${clamped}%` }} />
         </div>
-        <span className="text-[10px] text-text-secondary tabular-nums w-9 text-right">
+        <span className="text-2xs text-text-secondary tabular-nums w-9 text-right">
           {Math.round(pct)}%
         </span>
       </div>

@@ -57,7 +57,7 @@ export function StatisticsZeroSection({ data }: StatisticsZeroSectionProps) {
                   <span className="text-xs text-text-secondary">{fieldMeta(key).label}:</span>
                   <div className="flex flex-wrap gap-1 mt-1">
                     {(val as Array<Record<string, unknown>>).map((item, i) => (
-                      <span key={i} className="bg-surface px-2 py-0.5 rounded text-[10px] border border-border/30">
+                      <span key={i} className="bg-surface px-2 py-0.5 rounded text-2xs border border-border/30">
                         {Object.entries(item).map(([k, v]) => `${k}: ${v}`).join(', ')}
                       </span>
                     ))}
