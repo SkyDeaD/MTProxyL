@@ -133,6 +133,16 @@ panel_scheme() {
     fi
 }
 
+# Выпускается ли панель с этой ветки. Список, а не одно значение: в форке тег
+# стоит и на рабочей ветке, и на main, и обе дают один и тот же бинарник.
+_panel_branch_has_release() {
+    local _branch="$1" _known
+    for _known in ${PANEL_RELEASE_BRANCHES:-main}; do
+        [ "$_branch" = "$_known" ] && return 0
+    done
+    return 1
+}
+
 panel_install() {
     check_root || return 1
 
@@ -195,11 +205,12 @@ panel_install() {
     fi
     chmod +x "$_tmp"
 
-    # На не-main ветке релиз собран с main и правок этой ветки не содержит:
-    # ставить его — обманчиво «успешная» установка не того кода.
-    if [ "$GITHUB_BRANCH" != "main" ]; then
+    # Релиз панели выпускается с определённых веток. Наша среди них — готовый
+    # бинарник содержит ровно этот код, качать его быстрее и честнее, чем
+    # собирать. Не среди них — в релизе лежит чужой код, тогда собираем сами.
+    if ! _panel_branch_has_release "$GITHUB_BRANCH"; then
         log_info "CLI установлен из ветки ${GITHUB_BRANCH} — собираем панель из тех же исходников"
-        log_info "(релиз панели собран с main и может не содержать правок этой ветки)"
+        log_info "(панель выпускается с веток: ${PANEL_RELEASE_BRANCHES:-main} — правок этой ветки в релизе нет)"
         _panel_report_build_toolchain
         log_info "Нужен git; сборка занимает несколько минут"
 
@@ -209,7 +220,7 @@ panel_install() {
         return 0
     fi
 
-    # main: обычная установка из релиза.
+    # Ветка релизная: ставим готовый бинарник.
     if sh "$_tmp" install; then
         _panel_install_report
         return 0
