@@ -189,16 +189,21 @@ _ag_pad() {
 _argsgen_print_command() {
     local _branch="${GITHUB_BRANCH:-main}"
     local _url="https://raw.githubusercontent.com/${GITHUB_REPO:-Liafanx/MTProxyL}/${_branch}/install.sh"
-    local _branch_arg=""
+    local _branch_arg="" _repo_arg=""
     # Ветку указываем явно: список библиотек берётся из install.sh, и если он
     # с одной ветки, а файлы качаются с другой, установка падает на 404.
     [ "$_branch" != "main" ] && _branch_arg=" --branch ${_branch}"
+    # И репозиторий тоже: сам install.sh по умолчанию идёт к автору, а в форке
+    # есть библиотеки, которых там нет. Без этого установка на новом сервере
+    # обрывается на 404 у первой же нашей библиотеки.
+    [ -n "${GITHUB_REPO:-}" ] && [ "$GITHUB_REPO" != "Liafanx/MTProxyL" ] \
+        && _repo_arg=" --repo ${GITHUB_REPO}"
 
     echo ""
     echo -e "  ${BOLD}Скопируйте это на новый сервер и выполните под root:${NC}"
     echo ""
     echo -e "${CYAN}wget -qO /tmp/mtproxyl-install.sh ${_url}${NC}"
-    echo -e "${CYAN}bash /tmp/mtproxyl-install.sh${_branch_arg} -- $(_argsgen_build)${NC}"
+    echo -e "${CYAN}bash /tmp/mtproxyl-install.sh${_repo_arg}${_branch_arg} -- $(_argsgen_build)${NC}"
     echo ""
 }
 

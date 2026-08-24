@@ -140,9 +140,11 @@ for lib in colors utils settings secrets config docker binengine engine traffic 
             "${SCRIPT_URL}/lib/${lib}.sh" 2>/dev/null | tail -1 | tr -cd '0-9')
         if [ "$_code" = "404" ]; then
             echo "" >&2
-            echo "  В ветке '${BRANCH}' файла lib/${lib}.sh нет." >&2
-            echo "  Похоже, install.sh взят из другой ветки. Укажите ту же ветку явно:" >&2
-            echo "    sudo bash $0 --branch <ветка> [-- <аргументы установки>]" >&2
+            echo "  В ${REPO}, ветка '${BRANCH}': файла lib/${lib}.sh нет." >&2
+            echo "  Список библиотек взят из этого install.sh, а качаются они" >&2
+            echo "  отсюда — значит, скрипт и файлы из разных мест. Укажите" >&2
+            echo "  репозиторий и ветку явно:" >&2
+            echo "    sudo bash $0 --repo <владелец/репозиторий> --branch <ветка> [-- <аргументы>]" >&2
         else
             echo "  Установка прервана. Повторите попытку через 10–30 секунд." >&2
         fi

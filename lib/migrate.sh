@@ -612,7 +612,14 @@ migrate_run() {
         log_info "Проверьте там интернет и доступность github.com"
         return 1
     fi
-    if ! _mig_ssh "bash ${MIGRATE_REMOTE_SCRIPT} --branch $(_mig_quote "$_branch") -- $(_mig_quote "${_args[@]}")" </dev/null; then
+    # Репозиторий передаём явно: скачали мы установщик из своего, но сам он по
+    # умолчанию идёт к автору, а в форке есть библиотеки, которых там нет —
+    # переезд обрывался бы на 404 у первой же из них.
+    local _repo_arg=""
+    if [ -n "${GITHUB_REPO:-}" ] && [ "$GITHUB_REPO" != "Liafanx/MTProxyL" ]; then
+        _repo_arg="--repo $(_mig_quote "$GITHUB_REPO") "
+    fi
+    if ! _mig_ssh "bash ${MIGRATE_REMOTE_SCRIPT} ${_repo_arg}--branch $(_mig_quote "$_branch") -- $(_mig_quote "${_args[@]}")" </dev/null; then
         log_error "Установка на новом сервере не прошла"
         log_info "Зайдите туда и посмотрите: /tmp/mtproxyl-install.log"
         return 1
