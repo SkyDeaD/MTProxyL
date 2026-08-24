@@ -19,6 +19,7 @@ import { formatBytes } from '@/lib/utils';
 import { useQuota, resetUserQuota, type QuotaEntry } from '@/hooks/useQuota';
 import { QuotaBar } from '@/components/QuotaBar';
 import { buildProxyLinks, extractSecret, mergeUserStats, type UserLinks } from './usersPage.helpers';
+import { EmptyState } from '@/components/ui/state';
 
 type SortKey = 'username' | 'current_connections' | 'active_unique_ips' | 'total_octets' | 'total_bytes' | 'expiration_rfc3339';
 type SortDir = 'asc' | 'desc';
@@ -387,7 +388,7 @@ export function UsersPage() {
               <TableBody>
                 {pagedUsers.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={9} className="text-center text-text-secondary py-8">
+                    <TableCell colSpan={9} className="text-center text-sm text-text-secondary py-8">
                       {search ? 'Пользователи не найдены' : 'Пользователи не заданы'}
                     </TableCell>
                   </TableRow>
@@ -471,9 +472,9 @@ export function UsersPage() {
         {/* Mobile Cards */}
         <div className="lg:hidden space-y-3">
           {pagedUsers.length === 0 ? (
-            <div className="text-center text-text-secondary py-8 bg-surface-hover border border-border rounded-lg">
+            <EmptyState className="bg-surface-hover border border-border rounded-lg">
               {search ? 'Пользователи не найдены' : 'Пользователи не заданы'}
-            </div>
+            </EmptyState>
           ) : (
             pagedUsers.map((u) => {
               return (

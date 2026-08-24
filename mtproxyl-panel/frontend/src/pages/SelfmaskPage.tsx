@@ -9,6 +9,7 @@ import { ParamField } from '@/components/ParamField';
 import { mtproxylApi, type SelfmaskParam, type SelfmaskStatus } from '@/lib/api';
 import { useMtproxylOperation } from '@/hooks/useMtproxyl';
 import { PageShell } from '@/components/layout/PageShell';
+import { SkeletonRows } from '@/components/ui/state';
 
 const SITE_SOURCE_LABELS: Record<string, string> = {
   stub: 'Заглушка «сайт недоступен»',
@@ -219,7 +220,7 @@ export function SelfmaskPage() {
       <OperationProgress operation={operation} onDismiss={dismiss} />
 
       {loading && !status ? (
-        <div className="text-sm text-text-secondary">Загрузка…</div>
+        <SkeletonRows />
       ) : (
         status && (
           <>

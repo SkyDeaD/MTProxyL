@@ -10,6 +10,7 @@ import { useManagerOnly, useMtproxylOperation } from '@/hooks/useMtproxyl';
 import { formatBytes } from '@/lib/utils';
 import { ManagerOnlyNotice } from '@/components/ManagerOnlyNotice';
 import { PageShell } from '@/components/layout/PageShell';
+import { EmptyState, SkeletonRows } from '@/components/ui/state';
 
 function formatDate(unixSeconds: number): string {
   if (!unixSeconds) return '—';
@@ -105,12 +106,12 @@ export function BackupsPage() {
         </CardHeader>
         <CardContent>
           {loading && backups.length === 0 ? (
-            <div className="text-sm text-text-secondary">Загрузка…</div>
+            <SkeletonRows />
           ) : backups.length === 0 ? (
-            <div className="text-sm text-text-secondary">Бэкапов пока нет</div>
+            <EmptyState>Бэкапов пока нет</EmptyState>
           ) : (
             <div className="overflow-x-auto -mx-4 px-4 lg:-mx-6 lg:px-6">
-              <table className="w-full text-sm">
+              <table className="table-cards w-full text-sm">
                 <thead>
                   <tr className="text-left text-text-secondary border-b border-border">
                     <th className="py-2 pr-4 font-medium">Файл</th>
@@ -122,14 +123,14 @@ export function BackupsPage() {
                 <tbody>
                   {backups.map((b) => (
                     <tr key={b.name} className="border-b border-border last:border-0">
-                      <td className="py-2 pr-4 font-mono text-xs break-all">{b.name}</td>
-                      <td className="py-2 pr-4 whitespace-nowrap text-text-secondary">
+                      <td data-label="Файл" className="py-2 pr-4 font-mono text-xs break-all">{b.name}</td>
+                      <td data-label="Дата" className="py-2 pr-4 whitespace-nowrap text-text-secondary">
                         {formatDate(b.mtime)}
                       </td>
-                      <td className="py-2 pr-4 whitespace-nowrap text-text-secondary">
+                      <td data-label="Размер" className="py-2 pr-4 whitespace-nowrap text-text-secondary">
                         {formatBytes(b.size)}
                       </td>
-                      <td className="py-2">
+                      <td data-label="Действия" className="py-2">
                         <div className="flex items-center justify-end gap-2">
                           <a
                             href={mtproxylApi.downloadUrl(b.name)}

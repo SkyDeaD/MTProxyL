@@ -20,7 +20,7 @@ export function MEQualitySection({ data }: MEQualitySectionProps) {
           <div>
             <h4 className="text-xs font-semibold text-accent uppercase tracking-wide mb-2">Состояние дата-центров</h4>
             <div className="overflow-x-auto">
-              <table className="w-full text-xs">
+              <table className="table-cards w-full text-xs">
                 <thead>
                   <tr className="border-b border-border">
                     <th className="text-left py-2 px-2 text-text-secondary font-medium">DC</th>
@@ -32,14 +32,14 @@ export function MEQualitySection({ data }: MEQualitySectionProps) {
                 <tbody>
                   {data.data.dc_rtt.map((dc) => (
                     <tr key={dc.dc} className="border-b border-border/50">
-                      <td className="py-2 px-2 text-text-primary font-medium">DC {dc.dc}</td>
-                      <td className="py-2 px-2 text-right text-text-primary">
+                      <td data-label="DC" className="py-2 px-2 text-text-primary font-medium">DC {dc.dc}</td>
+                      <td data-label="RTT" className="py-2 px-2 text-right text-text-primary">
                         {dc.rtt_ema_ms != null ? `${dc.rtt_ema_ms.toFixed(1)}ms` : '-'}
                       </td>
-                      <td className="py-2 px-2 text-right text-text-primary">
+                      <td data-label="Писатели" className="py-2 px-2 text-right text-text-primary">
                         {dc.alive_writers} / {dc.required_writers}
                       </td>
-                      <td className="py-2 px-2 text-right">
+                      <td data-label="Покрытие" className="py-2 px-2 text-right">
                         <span className={cn(
                           'font-medium',
                           dc.coverage_pct >= 90 ? 'text-success' : dc.coverage_pct >= 50 ? 'text-warning' : 'text-danger'

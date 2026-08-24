@@ -167,7 +167,7 @@ export function AvailabilityPage() {
           {result.probes && result.probes.length > 0 && (
             <Card className="overflow-hidden">
               <div className="p-4 border-b border-border">
-                <h3 className="text-sm font-medium text-text-primary">
+                <h3 className="section-title">
                   Результаты по зондам ({result.probes.length})
                 </h3>
               </div>

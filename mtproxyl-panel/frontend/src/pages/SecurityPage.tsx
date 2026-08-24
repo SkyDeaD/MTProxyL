@@ -2,6 +2,7 @@ import { PageShell } from '@/components/layout/PageShell';
 import { ErrorAlert } from '@/components/ErrorAlert';
 import { TelemetryField } from '@/components/TelemetryField';
 import { useWsSubscription, useEndpoint } from '@/hooks/useWebSocket';
+import { EmptyState } from '@/components/ui/state';
 
 interface SecurityPostureData {
   api_read_only: boolean;
@@ -76,7 +77,7 @@ export function SecurityPage() {
 
       {posture && (
         <div className="glass rounded-card p-4">
-          <h3 className="text-sm font-medium text-text-secondary mb-1">Состояние безопасности</h3>
+          <h3 className="section-title mb-3">Состояние безопасности</h3>
           <p className="text-xs text-text-secondary/70 mb-4">
             Как движок сейчас настроен относительно доступа к API и сбора телеметрии.
           </p>
@@ -94,7 +95,7 @@ export function SecurityPage() {
       )}
 
       <div>
-        <h3 className="text-sm font-medium text-text-secondary mb-1">Белый список API</h3>
+        <h3 className="section-title mb-3">Белый список API</h3>
         <p className="text-xs text-text-secondary/70 mb-3">
           Адреса и подсети, которым движок отвечает на запросы к API. Пустой список при
           включённой проверке означает, что не пройдёт никто.
@@ -110,21 +111,21 @@ export function SecurityPage() {
             </div>
           </div>
         ) : (
-          <div className="bg-surface-hover border border-border rounded-lg p-6 text-center text-text-secondary text-sm">
+          <EmptyState className="bg-surface-hover border border-border rounded-lg">
             Список пуст
-          </div>
+          </EmptyState>
         )}
       </div>
 
       {limits && (
         <div className="bg-surface-hover border border-border rounded-lg p-4">
-          <h3 className="text-sm font-medium text-text-secondary mb-1">Действующие лимиты</h3>
+          <h3 className="section-title mb-3">Действующие лимиты</h3>
           <p className="text-xs text-text-secondary/70 mb-3">
             То, что движок применяет прямо сейчас, с учётом персональных настроек
             пользователей и правил по подсетям. Ноль означает «без ограничения».
           </p>
           {Object.keys(flatLimits).length === 0 ? (
-            <div className="text-sm text-text-secondary">Лимиты не заданы</div>
+            <EmptyState>Лимиты не заданы</EmptyState>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1">
               {Object.entries(flatLimits).map(([key, value]) => (

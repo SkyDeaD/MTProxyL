@@ -71,7 +71,7 @@ export function UpstreamsPage() {
       {upstreams && (
         <div className="space-y-4">
           <div>
-            <h3 className="text-sm font-medium text-text-secondary">Серверы-апстримы</h3>
+            <h3 className="section-title">Серверы-апстримы</h3>
             <p className="text-xs text-text-secondary/70 mt-0.5">
               Промежуточные серверы Telegram, через которые движок отдаёт трафик. Для каждого
               видно задержку и долю ошибок — по ним выбирается маршрут.
@@ -124,7 +124,7 @@ export function UpstreamsPage() {
       {dcs?.dcs && (
         <div className="space-y-4">
           <div>
-            <h3 className="text-sm font-medium text-text-secondary">Состояние DC</h3>
+            <h3 className="section-title">Состояние DC</h3>
             <p className="text-xs text-text-secondary/70 mt-0.5">
               Дата-центры Telegram (DC 1–5) и связь с каждым из них. Клиент сам выбирает свой
               DC, поэтому недоступность одного задевает только часть пользователей.
@@ -175,7 +175,7 @@ export function UpstreamsPage() {
       {meWriters && (
         <div className="space-y-4">
           <div>
-            <h3 className="text-sm font-medium text-text-secondary">Писатели ME</h3>
+            <h3 className="section-title">Писатели ME</h3>
             <p className="text-xs text-text-secondary/70 mt-0.5">
               Соединения, через которые движок пишет в промежуточные серверы. Если живых
               меньше, чем требуется, пул считается неполным и трафик идёт хуже.

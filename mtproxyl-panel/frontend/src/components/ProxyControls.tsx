@@ -59,7 +59,7 @@ export function ProxyControls() {
     <div className="glass rounded-card p-4 space-y-3">
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
-          <h3 className="text-sm font-medium text-text-secondary">
+          <h3 className="section-title">
             Управление прокси
             {!isManager && <span className="ml-2 text-xs">(обнаруженная цель)</span>}
           </h3>

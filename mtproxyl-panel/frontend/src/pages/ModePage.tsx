@@ -14,6 +14,7 @@ import {
 } from '@/lib/api';
 import { useMtproxylOperation } from '@/hooks/useMtproxyl';
 import { PageShell } from '@/components/layout/PageShell';
+import { SkeletonRows } from '@/components/ui/state';
 
 /** Word the user must type to confirm, mirroring MTProxyL's own CLI prompt. */
 const CONFIRM_WORD = 'yes';
@@ -166,7 +167,7 @@ export function ModePage() {
       <OperationProgress operation={operation} onDismiss={dismiss} />
 
       {loading && !status ? (
-        <div className="text-sm text-text-secondary">Загрузка…</div>
+        <SkeletonRows />
       ) : (
         <>
           <div className="grid gap-4 md:grid-cols-2">

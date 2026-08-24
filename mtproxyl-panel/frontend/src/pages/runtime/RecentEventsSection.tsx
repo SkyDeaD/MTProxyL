@@ -1,5 +1,6 @@
 import { CollapsibleSection } from '@/components/CollapsibleSection';
 import type { EventsData } from '@/types/runtime';
+import { EmptyState } from '@/components/ui/state';
 
 interface RecentEventsSectionProps {
   data: EventsData | null;
@@ -13,7 +14,7 @@ export function RecentEventsSection({ data }: RecentEventsSectionProps) {
       description="Лента заметных событий движка: смена поколения пула, потеря апстрима, ошибки маршрутизации.">
       <div className="max-h-72 overflow-y-auto space-y-0.5 font-mono text-xs">
         {data.events.length === 0 ? (
-          <p className="text-text-secondary py-4 text-center font-sans">Событий пока нет</p>
+          <EmptyState className="font-sans py-4">Событий пока нет</EmptyState>
         ) : (
           data.events.map((evt, i) => (
             <div key={i} className="flex gap-3 py-1 px-2 rounded hover:bg-surface-hover">

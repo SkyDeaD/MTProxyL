@@ -318,7 +318,7 @@ function DcCard({
       title={`Дата-центры Telegram — покрытие ${coverage}%${ok ? '' : ' (просело)'}`}
     >
       <div className="overflow-x-auto -mx-4 px-4 lg:-mx-6 lg:px-6">
-        <table className="w-full text-sm">
+        <table className="table-cards w-full text-sm">
           <thead>
             <tr className="text-left text-text-secondary border-b border-border">
               <th className="py-2 pr-4 font-medium">DC</th>
@@ -332,16 +332,16 @@ function DcCard({
               const cov = Math.round(d.coverage_pct ?? 0);
               return (
                 <tr key={d.dc} className="border-b border-border last:border-0">
-                  <td className="py-2 pr-4 text-text-primary">
+                  <td data-label="DC" className="py-2 pr-4 text-text-primary">
                     <StatusDot status={rowOk(cov) ? 'ok' : 'warn'} size="sm" /> DC {d.dc}
                   </td>
-                  <td className="py-2 pl-4 text-right font-mono text-xs">
+                  <td data-label="RTT" className="py-2 pl-4 text-right font-mono text-xs">
                     {d.rtt_ms == null ? '—' : `${Math.round(d.rtt_ms)} мс`}
                   </td>
-                  <td className="py-2 pl-4 text-right font-mono text-xs">
+                  <td data-label="Писатели" className="py-2 pl-4 text-right font-mono text-xs">
                     {d.alive_writers} / {d.required_writers}
                   </td>
-                  <td className={`py-2 pl-4 text-right ${rowOk(cov) ? '' : 'text-warning'}`}>
+                  <td data-label="Покрытие" className={`py-2 pl-4 text-right ${rowOk(cov) ? '' : 'text-warning'}`}>
                     {cov}%
                   </td>
                 </tr>

@@ -26,7 +26,7 @@ export function ConnectionsSection({ data }: ConnectionsSectionProps) {
               <div>
                 <h4 className="text-xs font-semibold text-accent uppercase tracking-wide mb-2">Топ по соединениям</h4>
                 <div className="overflow-x-auto">
-                  <table className="w-full text-xs">
+                  <table className="table-cards w-full text-xs">
                     <thead>
                       <tr className="border-b border-border">
                         <th className="text-left py-2 px-2 text-text-secondary font-medium">Пользователь</th>
@@ -37,9 +37,9 @@ export function ConnectionsSection({ data }: ConnectionsSectionProps) {
                     <tbody>
                       {data.top.by_connections.map((user, i) => (
                         <tr key={i} className="border-b border-border/50">
-                          <td className="py-2 px-2 text-text-primary font-medium">{user.username}</td>
-                          <td className="py-2 px-2 text-right text-text-primary">{formatNumber(user.current_connections)}</td>
-                          <td className="py-2 px-2 text-right text-text-primary">{formatBytes(user.total_octets)}</td>
+                          <td data-label="Пользователь" className="py-2 px-2 text-text-primary font-medium">{user.username}</td>
+                          <td data-label="Соединения" className="py-2 px-2 text-right text-text-primary">{formatNumber(user.current_connections)}</td>
+                          <td data-label="Трафик" className="py-2 px-2 text-right text-text-primary">{formatBytes(user.total_octets)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -51,7 +51,7 @@ export function ConnectionsSection({ data }: ConnectionsSectionProps) {
               <div>
                 <h4 className="text-xs font-semibold text-accent uppercase tracking-wide mb-2">Топ по трафику</h4>
                 <div className="overflow-x-auto">
-                  <table className="w-full text-xs">
+                  <table className="table-cards w-full text-xs">
                     <thead>
                       <tr className="border-b border-border">
                         <th className="text-left py-2 px-2 text-text-secondary font-medium">Пользователь</th>
@@ -62,9 +62,9 @@ export function ConnectionsSection({ data }: ConnectionsSectionProps) {
                     <tbody>
                       {data.top.by_throughput.map((user, i) => (
                         <tr key={i} className="border-b border-border/50">
-                          <td className="py-2 px-2 text-text-primary font-medium">{user.username}</td>
-                          <td className="py-2 px-2 text-right text-text-primary">{formatNumber(user.current_connections)}</td>
-                          <td className="py-2 px-2 text-right text-text-primary">{formatBytes(user.total_octets)}</td>
+                          <td data-label="Пользователь" className="py-2 px-2 text-text-primary font-medium">{user.username}</td>
+                          <td data-label="Соединения" className="py-2 px-2 text-right text-text-primary">{formatNumber(user.current_connections)}</td>
+                          <td data-label="Трафик" className="py-2 px-2 text-right text-text-primary">{formatBytes(user.total_octets)}</td>
                         </tr>
                       ))}
                     </tbody>

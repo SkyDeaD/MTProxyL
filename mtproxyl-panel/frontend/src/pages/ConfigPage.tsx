@@ -6,6 +6,7 @@ import { QuickSettingsTab } from '@/components/config/QuickSettingsTab';
 import { AdvancedEditorTab } from '@/components/config/AdvancedEditorTab';
 import { useMtproxyl } from '@/hooks/useMtproxyl';
 import { PageShell } from '@/components/layout/PageShell';
+import { SkeletonRows } from '@/components/ui/state';
 
 type Tab = 'quick' | 'advanced';
 
@@ -137,7 +138,7 @@ export function ConfigPage() {
   if (loading) {
     return (
       <PageShell title="Конфигурация">
-        <div className="text-text-secondary">Загрузка конфигурации…</div>
+        <SkeletonRows />
       </PageShell>
     );
   }

@@ -10,6 +10,7 @@ import { ManagerOnlyNotice } from '@/components/ManagerOnlyNotice';
 import { useManagerOnly } from '@/hooks/useMtproxyl';
 import { mtproxylExpertApi, type ExpertParam, type SuperExpertStatus } from '@/lib/api';
 import { PageShell } from '@/components/layout/PageShell';
+import { SkeletonRows } from '@/components/ui/state';
 
 /** Совпадает ли параметр со строкой поиска. */
 function matches(p: ExpertParam, q: string): boolean {
@@ -201,7 +202,7 @@ export function ExpertPage() {
           </Card>
 
           {loading && params.length === 0 ? (
-            <div className="text-sm text-text-secondary">Загрузка…</div>
+            <SkeletonRows />
           ) : sections.length === 0 ? (
             <div className="text-sm text-text-secondary">Ничего не найдено</div>
           ) : (

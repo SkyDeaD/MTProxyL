@@ -8,6 +8,7 @@ import { MtproxylUpdateCard } from '@/components/MtproxylUpdateCard';
 import { MtproxylEngineCard } from '@/components/MtproxylEngineCard';
 import { cn } from '@/lib/utils';
 import { RefreshCw, Download, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
+import { SkeletonRows } from '@/components/ui/state';
 
 interface UpdateStatus {
   phase: string;
@@ -112,7 +113,7 @@ function AutoUpdateCard({
   return (
     <div className="bg-surface rounded-lg p-4 lg:p-5 border border-border">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-xs lg:text-sm font-semibold text-text-primary">{title}</h3>
+        <h3 className="section-title">{title}</h3>
         {state.last_check_at && (
           <span className="text-2xs lg:text-xs text-text-secondary">
             Последняя проверка: {new Date(state.last_check_at).toLocaleString('ru-RU')}
@@ -217,7 +218,7 @@ function VersionSelect({
   currentVersion: string;
 }) {
   if (loading) {
-    return <div className="text-sm text-text-secondary">Загрузка релизов...</div>;
+    return <SkeletonRows />;
   }
   if (error) {
     return (
@@ -357,9 +358,9 @@ function ConfirmModal({
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-surface rounded-lg p-6 max-w-md mx-4 border border-border">
-        <h3 className="text-lg font-semibold text-text-primary mb-4">Подтверждение</h3>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
+      <div className="glass rounded-modal p-6 max-w-md mx-4">
+        <h3 className="text-xl font-[640] tracking-[-0.02em] text-text-primary mb-3">Подтверждение</h3>
         {warnings.map((w, i) => (
           <p key={i} className="text-warning text-sm mb-2">{w}</p>
         ))}
@@ -594,7 +595,7 @@ export function UpdatePage() {
       {/* Auto-update settings */}
       {autoStatus && (
         <div className="bg-surface rounded-lg p-4 lg:p-5 border border-border">
-          <h2 className="text-xs lg:text-sm font-semibold text-text-primary mb-3 lg:mb-4">Автообновление</h2>
+          <h2 className="section-title mb-3">Автообновление</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 lg:gap-4">
             <AutoUpdateCard
               title="Panel"
@@ -615,7 +616,7 @@ export function UpdatePage() {
       {/* Panel Update Section */}
       <div className="bg-surface rounded-lg p-4 lg:p-5 border border-border">
         <div className="flex items-center justify-between mb-3 lg:mb-4">
-          <h2 className="text-xs lg:text-sm font-semibold text-text-primary">Версия панели</h2>
+          <h2 className="section-title">Версия панели</h2>
           <button
             onClick={fetchPanelReleases}
             disabled={panelReleasesLoading || !!isPanelUpdating}
@@ -708,7 +709,7 @@ export function UpdatePage() {
       {/* Panel Update Progress */}
       {panelStatus && panelStatus.phase !== 'idle' && (
         <div className="bg-surface rounded-lg p-4 lg:p-5 border border-border">
-          <h2 className="text-xs lg:text-sm font-semibold text-text-primary mb-3 lg:mb-4">Ход обновления Panel</h2>
+          <h2 className="section-title mb-3">Ход обновления Panel</h2>
 
           <ProgressSteps phase={panelStatus.phase} currentStep={panelCurrentStep} />
 
@@ -740,7 +741,7 @@ export function UpdatePage() {
       {/* Telemt Update Section */}
       {mtproxylEnabled ? (
         <div className="bg-surface rounded-lg p-4 lg:p-5 border border-border">
-          <h2 className="text-xs lg:text-sm font-semibold text-text-primary mb-2">Версия Telemt</h2>
+          <h2 className="section-title mb-3">Версия Telemt</h2>
           <p className="text-sm text-text-secondary">
             Движком telemt управляет MTProxyL — в режиме Manager он запускается в Docker,
             а не как systemd-сервис, поэтому встроенный механизм обновления здесь неприменим.
@@ -753,7 +754,7 @@ export function UpdatePage() {
 
       <div className="bg-surface rounded-lg p-4 lg:p-5 border border-border">
         <div className="flex items-center justify-between mb-3 lg:mb-4">
-          <h2 className="text-xs lg:text-sm font-semibold text-text-primary">Версия Telemt</h2>
+          <h2 className="section-title">Версия Telemt</h2>
           <button
             onClick={fetchReleases}
             disabled={releasesLoading || !!isUpdating}
@@ -844,7 +845,7 @@ export function UpdatePage() {
       {/* Update Progress */}
       {status && status.phase !== 'idle' && (
         <div className="bg-surface rounded-lg p-4 lg:p-5 border border-border">
-          <h2 className="text-xs lg:text-sm font-semibold text-text-primary mb-3 lg:mb-4">Ход обновления Telemt</h2>
+          <h2 className="section-title mb-3">Ход обновления Telemt</h2>
 
           <ProgressSteps phase={status.phase} currentStep={currentStep} />
 

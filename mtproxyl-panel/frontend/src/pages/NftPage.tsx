@@ -10,6 +10,7 @@ import { CollapsibleSection } from '@/components/CollapsibleSection';
 import { mtproxylNetApi, type NftAction, type NftParam, type NftStatus } from '@/lib/api';
 import { useMtproxylOperation } from '@/hooks/useMtproxyl';
 import { PageShell } from '@/components/layout/PageShell';
+import { SkeletonRows } from '@/components/ui/state';
 
 // Параметры сгруппированы, чтобы форма не читалась плоским списком из 25 ключей.
 // Порядок групп повторяет порядок разделов страницы.
@@ -203,7 +204,7 @@ export function NftPage() {
       <OperationProgress operation={operation} onDismiss={dismiss} />
 
       {loading && !status ? (
-        <div className="text-sm text-text-secondary">Загрузка…</div>
+        <SkeletonRows />
       ) : (
         status && (
           <>
@@ -337,7 +338,7 @@ export function NftPage() {
             <div className="pt-2">
               <div className="flex items-center gap-3 mb-2">
                 <div className="h-px flex-1 bg-border" />
-                <h2 className="text-sm font-medium text-text-secondary">Устаревшие методы</h2>
+                <h2 className="section-title">Устаревшие методы</h2>
                 <div className="h-px flex-1 bg-border" />
               </div>
               <p className="text-xs text-text-secondary/70 mb-3">

@@ -3,6 +3,7 @@ import { useLogStream } from '@/hooks/useLogStream';
 import { parseLogLineParts, type LogPartKind } from '@/pages/logsPage.helpers';
 import { Play, Square, Pause, Download, Trash2, Search } from 'lucide-react';
 import { PageShell } from '@/components/layout/PageShell';
+import { SkeletonRows } from '@/components/ui/state';
 
 interface LogSourceStatus {
   available: boolean;
@@ -180,7 +181,7 @@ export function LogsPage() {
   if (statusLoading) {
     return (
       <PageShell title="Логи">
-        <div className="text-text-secondary">Loading...</div>
+        <SkeletonRows />
       </PageShell>
     );
   }

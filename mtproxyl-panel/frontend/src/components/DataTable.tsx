@@ -29,7 +29,7 @@ export function DataTable<T extends Record<string, unknown>>({
   return (
     <div className="border border-border rounded-lg overflow-hidden">
       <div className="overflow-x-auto">
-        <Table>
+        <Table className="table-cards">
           <TableHeader>
             <TableRow>
               {columns.map((col) => (
@@ -51,7 +51,7 @@ export function DataTable<T extends Record<string, unknown>>({
               data.map((row, i) => (
                 <TableRow key={String(row[keyField] ?? i)}>
                   {columns.map((col) => (
-                    <TableCell key={col.key} className="whitespace-nowrap">
+                    <TableCell key={col.key} data-label={col.header} className="whitespace-nowrap">
                       {col.render
                         ? col.render(row)
                         : String(row[col.key] ?? '')}

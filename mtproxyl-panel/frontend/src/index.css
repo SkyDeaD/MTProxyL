@@ -346,4 +346,61 @@
   .num {
     font-variant-numeric: tabular-nums;
   }
+
+  /* Заголовок секции внутри страницы. Одно определение на всю панель:
+     раньше таких заголовков было четыре системы разом — серым мелким,
+     мелким жирным, крупным и «как в карточке», — и секции, собранные
+     руками, выглядели чужими рядом с секциями на Card. Кегль и вес те же,
+     что у CardTitle: это один уровень заголовка, различаться им не за что. */
+  .section-title {
+    font-size: var(--text-base);
+    font-weight: 640;
+    letter-spacing: -0.02em;
+    color: rgb(var(--c-text-primary));
+  }
+
+  /* ═══ Таблица карточками на телефоне ═══════════════════════════════════
+     Горизонтальная прокрутка в мониторинге нечитаема: половина колонок
+     просто не видна, и человек не знает, что она там есть. Ниже 720px
+     строка разворачивается в карточку, где у каждого значения слева стоит
+     имя колонки — его подставляет data-label у ячейки. */
+  @media (max-width: 720px) {
+    .table-cards thead {
+      display: none;
+    }
+    .table-cards tbody tr {
+      display: block;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line-2);
+    }
+    .table-cards tbody tr:last-child {
+      border-bottom: 0;
+    }
+    .table-cards tbody td {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      padding: 3px 0;
+      border: 0;
+      white-space: normal;
+    }
+    /* Ячейка без подписи — обычно колонка действий: занимает всю ширину. */
+    /* Правое выравнивание колонки в карточке теряет смысл: колонок больше нет,
+       а подпись из-за него уезжала от левого края. */
+    .table-cards tbody td {
+      text-align: left;
+    }
+    .table-cards tbody td[data-label]::before {
+      content: attr(data-label);
+      flex: 0 0 92px;
+      text-align: left;
+      color: rgb(var(--c-text-secondary));
+      font-size: var(--text-2xs);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .table-cards tbody tr:hover td {
+      background: none;
+    }
+  }
 }

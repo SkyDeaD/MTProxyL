@@ -175,7 +175,7 @@ function IPTable({ ips, geoData, hasGeo, historyByIp }: IPTableProps) {
 
       <div className="border border-border rounded-lg overflow-hidden">
         <div className="overflow-x-auto">
-          <Table>
+          <Table className="table-cards">
             <TableHeader>
               <TableRow>
                 <SortableHead label="IP-адрес" sortKey="ip" active={sortKey} dir={sortDir} onSort={toggleSort} />
@@ -208,9 +208,9 @@ function IPTable({ ips, geoData, hasGeo, historyByIp }: IPTableProps) {
                   const hist = historyByIp?.get(ip);
                   return (
                     <TableRow key={ip}>
-                      <TableCell className="font-mono text-sm">{ip}</TableCell>
+                      <TableCell data-label="IP-адрес" className="font-mono text-sm">{ip}</TableCell>
                       {hasGeo && (
-                        <TableCell>
+                        <TableCell data-label="Страна">
                           <span className="mr-1.5">{geo ? countryFlag(geo.country) : ''}</span>
                           <span className="text-sm">{geo?.country_name || '—'}</span>
                           {geo?.country && geo.country !== '??' && (
@@ -219,10 +219,10 @@ function IPTable({ ips, geoData, hasGeo, historyByIp }: IPTableProps) {
                         </TableCell>
                       )}
                       {hasGeo && (
-                        <TableCell className="text-sm">{geo?.city || '—'}</TableCell>
+                        <TableCell data-label="Город" className="text-sm">{geo?.city || '—'}</TableCell>
                       )}
                       {hasGeo && (
-                        <TableCell className="text-sm">
+                        <TableCell data-label="ASN" className="text-sm">
                           {geo?.asn ? (
                             <span>
                               <span className="font-mono">{geo.asn}</span>
@@ -234,12 +234,12 @@ function IPTable({ ips, geoData, hasGeo, historyByIp }: IPTableProps) {
                         </TableCell>
                       )}
                       {historyByIp && (
-                        <TableCell className="text-sm whitespace-nowrap">
+                        <TableCell data-label="Впервые" className="text-sm whitespace-nowrap">
                           {hist ? formatSeen(hist.first_seen) : '—'}
                         </TableCell>
                       )}
                       {historyByIp && (
-                        <TableCell className="text-sm whitespace-nowrap">
+                        <TableCell data-label="Последний раз" className="text-sm whitespace-nowrap">
                           {hist ? formatSeen(hist.last_seen) : '—'}
                         </TableCell>
                       )}

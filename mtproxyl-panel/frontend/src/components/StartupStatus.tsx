@@ -67,7 +67,7 @@ export function StartupStatus({ status, stage, progressPct }: StartupStatusProps
     <>
       <div className="glass rounded-card p-4">
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-medium text-text-primary">Состояние сервиса</h3>
+          <h3 className="section-title">Состояние сервиса</h3>
           {showRestart && (
             <Button
               variant="outline"

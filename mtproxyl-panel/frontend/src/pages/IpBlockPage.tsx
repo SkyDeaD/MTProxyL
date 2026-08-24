@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { ErrorAlert } from '@/components/ErrorAlert';
 import { mtproxylNetApi, type IpBlockStatus, type IpBlockHit } from '@/lib/api';
 import { PageShell } from '@/components/layout/PageShell';
+import { EmptyState, SkeletonRows } from '@/components/ui/state';
 
 /** Адрес или подсеть: IPv4 с маской 0-32, IPv6 с маской 0-128. */
 export function validateEntry(raw: string): string | null {
@@ -258,12 +259,12 @@ export function IpBlockPage() {
           )}
 
           {loading && !status ? (
-            <div className="text-sm text-text-secondary">Загрузка…</div>
+            <SkeletonRows />
           ) : !status || status.entries.length === 0 ? (
-            <div className="text-sm text-text-secondary">Список пуст</div>
+            <EmptyState>Список пуст</EmptyState>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="table-cards w-full text-sm">
                 <thead>
                   <tr className="text-left text-text-secondary border-b border-border">
                     <th className="py-2 pr-4 font-normal">Адрес</th>
@@ -278,12 +279,12 @@ export function IpBlockPage() {
                     const h = hitFor(e);
                     return (
                       <tr key={e} className="border-b border-border/50">
-                        <td className="py-2 pr-4 font-mono text-text-primary">{e}</td>
-                        <td className="py-2 pr-4 text-right text-text-primary">{h?.packets ?? 0}</td>
-                        <td className="py-2 pr-4 text-right text-text-secondary">
+                        <td data-label="Адрес" className="py-2 pr-4 font-mono text-text-primary">{e}</td>
+                        <td data-label="Пакетов" className="py-2 pr-4 text-right text-text-primary">{h?.packets ?? 0}</td>
+                        <td data-label="Трафик" className="py-2 pr-4 text-right text-text-secondary">
                           {human(h?.bytes ?? 0)}
                         </td>
-                        <td className="py-2 pr-4 text-text-secondary">
+                        <td data-label="Последнее срабатывание" className="py-2 pr-4 text-text-secondary">
                           {h && h.last !== '-' ? h.last.replace('T', ' ').replace('Z', '') : '—'}
                         </td>
                         <td className="py-2">

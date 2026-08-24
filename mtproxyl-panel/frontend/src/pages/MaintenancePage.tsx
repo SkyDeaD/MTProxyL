@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { useBranding } from '@/hooks/useBranding';
 import { brandingApi, mtproxylSettingsApi, type MtproxylSetting } from '@/lib/api';
 import { PageShell } from '@/components/layout/PageShell';
+import { SkeletonRows } from '@/components/ui/state';
 
 /**
  * Настройки самого MTProxyL: в конфиг движка не попадают, поэтому им не место
@@ -98,7 +99,7 @@ export function MaintenancePage() {
       {notice && <div className="text-sm text-success">{notice}</div>}
 
       {loading && params.length === 0 ? (
-        <div className="text-sm text-text-secondary">Загрузка…</div>
+        <SkeletonRows />
       ) : shown.length === 0 ? (
         <Card>
           <CardContent className="p-card pt-0 text-sm text-text-secondary">

@@ -140,7 +140,7 @@ export function TgbotPage() {
 
       <div className="flex items-center gap-2 pt-2">
         <Bot className="h-4 w-4 text-accent" />
-        <h2 className="text-lg font-semibold">Бот-администратор</h2>
+        <h2 className="section-title">Бот-администратор</h2>
       </div>
       <OperationProgress operation={operation} onDismiss={dismiss} />
 
@@ -407,7 +407,7 @@ export function TgbotPage() {
           про него узнают только те, кто догадался туда нажать. */}
       <div className="flex items-center gap-2 pt-2">
         <Bot className="h-4 w-4 text-accent" />
-        <h2 className="text-lg font-semibold">Бот-сторож</h2>
+        <h2 className="section-title">Бот-сторож</h2>
       </div>
       <p className="text-xs text-text-secondary">
         Не управляет прокси: держит в чате одно живое сообщение и будит звуком, когда прокси

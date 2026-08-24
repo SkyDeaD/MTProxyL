@@ -19,7 +19,7 @@ export function CollapsibleSection({ title, description, badge, defaultOpen = tr
         className="w-full flex items-center justify-between py-3 lg:py-4 px-4 hover:bg-surface-hover transition-colors text-left min-h-[44px]"
       >
         <div className="flex items-center gap-2 min-w-0">
-          <h3 className="text-sm font-medium text-text-primary">{title}</h3>
+          <h3 className="section-title">{title}</h3>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           {badge}

@@ -8,6 +8,7 @@ import { useManagerOnly } from '@/hooks/useMtproxyl';
 import { mtproxylSettingsApi, type MtproxylSetting } from '@/lib/api';
 import { MAINTENANCE_KEYS } from '@/pages/MaintenancePage';
 import { PageShell } from '@/components/layout/PageShell';
+import { SkeletonRows } from '@/components/ui/state';
 
 /**
  * Настройки сгруппированы по смыслу, а не свалены одним списком из 16 полей.
@@ -141,7 +142,7 @@ export function SettingsPage() {
           )}
 
           {loading && params.length === 0 ? (
-            <div className="text-sm text-text-secondary">Загрузка…</div>
+            <SkeletonRows />
           ) : (
             <div className="space-y-4">
               {GROUPS.map((group) => {

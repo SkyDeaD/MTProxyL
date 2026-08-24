@@ -12,6 +12,7 @@ import { useTheme } from '@/hooks/useTheme';
 import { mtproxylExpertApi, type SuperExpertStatus } from '@/lib/api';
 import { formatBytes } from '@/lib/utils';
 import { PageShell } from '@/components/layout/PageShell';
+import { SkeletonRows } from '@/components/ui/state';
 
 // Запасной текст на случай, когда конфига нет вовсе. Обычно редактор
 // заполняется действующим конфигом — его же копирует включение режима.
@@ -138,7 +139,7 @@ export function SuperExpertPage() {
           )}
 
           {loading && !status ? (
-            <div className="text-sm text-text-secondary">Загрузка…</div>
+            <SkeletonRows />
           ) : (
             status && (
               <>

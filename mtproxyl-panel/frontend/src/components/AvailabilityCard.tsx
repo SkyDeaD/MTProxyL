@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { availabilityApi, type AvailabilityLevel, type AvailabilityResult } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import { SkeletonRows } from '@/components/ui/state';
 
 const LEVEL_TEXT: Record<AvailabilityLevel, string> = {
   green: 'text-success',
@@ -89,7 +90,7 @@ function Body({
   message?: string;
 }) {
   if (loading) {
-    return <div className="text-sm text-text-secondary">Загрузка…</div>;
+    return <SkeletonRows />;
   }
   if (error) {
     return <div className="text-sm text-danger">{error}</div>;

@@ -61,7 +61,7 @@ export function MtproxylUpdateCard() {
   return (
     <div className="bg-surface rounded-lg p-4 lg:p-5 border border-border">
       <div className="flex items-center justify-between mb-3 lg:mb-4">
-        <h2 className="text-xs lg:text-sm font-semibold text-text-primary">Версия MTProxyL</h2>
+        <h2 className="section-title">Версия MTProxyL</h2>
         <button
           onClick={() => load(true)}
           disabled={loading || running}

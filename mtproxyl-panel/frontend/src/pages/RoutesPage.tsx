@@ -11,6 +11,7 @@ import { ManagerOnlyNotice } from '@/components/ManagerOnlyNotice';
 import { useManagerOnly } from '@/hooks/useMtproxyl';
 import { mtproxylNetApi, type Upstream, type UpstreamSpec } from '@/lib/api';
 import { PageShell } from '@/components/layout/PageShell';
+import { EmptyState, SkeletonRows } from '@/components/ui/state';
 
 const EMPTY_SPEC: UpstreamSpec = {
   name: '',
@@ -184,14 +185,12 @@ export function RoutesPage() {
         </CardHeader>
         <CardContent>
           {loading && routes.length === 0 ? (
-            <div className="text-sm text-text-secondary">Загрузка…</div>
+            <SkeletonRows />
           ) : routes.length === 0 ? (
-            <div className="text-sm text-text-secondary">
-              Маршруты не заданы — весь трафик идёт напрямую
-            </div>
+            <EmptyState>Маршруты не заданы — весь трафик идёт напрямую</EmptyState>
           ) : (
             <div className="overflow-x-auto -mx-4 px-4 lg:-mx-6 lg:px-6">
-              <table className="w-full text-sm">
+              <table className="table-cards w-full text-sm">
                 <thead>
                   <tr className="text-left text-text-secondary border-b border-border">
                     <th className="py-2 pr-4 font-medium">Имя</th>
@@ -206,27 +205,27 @@ export function RoutesPage() {
                 <tbody>
                   {routes.map((r) => (
                     <tr key={r.name} className="border-b border-border last:border-0">
-                      <td className="py-2 pr-4 text-text-primary">{r.name}</td>
-                      <td className="py-2 pr-4 text-text-secondary">{r.type}</td>
-                      <td className="py-2 pr-4 font-mono text-xs break-all">
+                      <td data-label="Имя" className="py-2 pr-4 text-text-primary">{r.name}</td>
+                      <td data-label="Тип" className="py-2 pr-4 text-text-secondary">{r.type}</td>
+                      <td data-label="Адрес" className="py-2 pr-4 font-mono text-xs break-all">
                         {r.address || '—'}
                         {r.iface && <span className="text-text-secondary"> ({r.iface})</span>}
                         {r.has_password && (
                           <span className="text-text-secondary"> · с паролем</span>
                         )}
                       </td>
-                      <td className="py-2 pr-4 text-text-secondary">{r.weight}</td>
-                      <td className="py-2 pr-4 text-text-secondary">
+                      <td data-label="Вес" className="py-2 pr-4 text-text-secondary">{r.weight}</td>
+                      <td data-label="Область" className="py-2 pr-4 text-text-secondary">
                         {r.scopes ? (
                           <span className="font-mono text-xs break-all">{r.scopes}</span>
                         ) : (
                           <span title="Обслуживает запросы без scope">все</span>
                         )}
                       </td>
-                      <td className="py-2 pr-4">
+                      <td data-label="Состояние" className="py-2 pr-4">
                         <StatusBadge status={r.enabled} labelOn="ВКЛ" labelOff="ВЫКЛ" />
                       </td>
-                      <td className="py-2">
+                      <td data-label="Действия" className="py-2">
                         <div className="flex items-center justify-end gap-2">
                           <Button
                             size="sm"

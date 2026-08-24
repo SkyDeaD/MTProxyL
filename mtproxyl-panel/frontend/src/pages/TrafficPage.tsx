@@ -7,6 +7,7 @@ import { PageShell } from '@/components/layout/PageShell';
 import { formatBytes } from '@/lib/utils';
 import { mtproxylNetApi, type TrafficReport, type TrafficUser } from '@/lib/api';
 import { StatsResetCard } from '@/components/StatsResetCard';
+import { EmptyState, SkeletonRows } from '@/components/ui/state';
 
 type SortKey = 'total' | 'in' | 'out' | 'connections' | 'unique_ips' | 'user';
 
@@ -106,7 +107,7 @@ export function TrafficPage() {
       )}
 
       {loading && !report ? (
-        <div className="text-sm text-text-secondary">Загрузка…</div>
+        <SkeletonRows />
       ) : (
         report && (
           <>
@@ -155,10 +156,10 @@ export function TrafficPage() {
               </CardHeader>
               <CardContent>
                 {sorted.length === 0 ? (
-                  <div className="text-sm text-text-secondary">Данных пока нет</div>
+                  <EmptyState>Данных пока нет</EmptyState>
                 ) : (
                   <div className="overflow-x-auto -mx-4 px-4 lg:-mx-6 lg:px-6">
-                    <table className="w-full text-sm">
+                    <table className="table-cards w-full text-sm">
                       <thead>
                         <tr className="text-left text-text-secondary border-b border-border">
                           <SortHeader
@@ -238,7 +239,7 @@ function Row({ user, directional }: { user: TrafficUser; directional: boolean })
   const session = user.session_in + user.session_out;
   return (
     <tr className="border-b border-border last:border-0">
-      <td className="py-2 pr-4 text-text-primary">
+      <td data-label="Пользователь" className="py-2 pr-4 text-text-primary">
         <span className={user.deleted ? 'text-text-secondary italic' : undefined}>{user.user}</span>
         {user.deleted && (
           <div className="text-xs text-text-secondary">
@@ -253,15 +254,15 @@ function Row({ user, directional }: { user: TrafficUser; directional: boolean })
       </td>
       {directional && (
         <>
-          <td className="py-2 pl-4 text-right font-mono text-xs">{formatBytes(user.in)}</td>
-          <td className="py-2 pl-4 text-right font-mono text-xs">{formatBytes(user.out)}</td>
+          <td data-label="Скачано" className="py-2 pl-4 text-right font-mono text-xs">{formatBytes(user.in)}</td>
+          <td data-label="Отправлено" className="py-2 pl-4 text-right font-mono text-xs">{formatBytes(user.out)}</td>
         </>
       )}
-      <td className="py-2 pl-4 text-right font-mono text-xs text-text-primary">
+      <td data-label="Всего" className="py-2 pl-4 text-right font-mono text-xs text-text-primary">
         {formatBytes(user.total)}
       </td>
-      <td className="py-2 pl-4 text-right text-text-secondary">{user.connections}</td>
-      <td className="py-2 pl-4 text-right text-text-secondary">{user.unique_ips ?? 0}</td>
+      <td data-label="Соединения" className="py-2 pl-4 text-right text-text-secondary">{user.connections}</td>
+      <td data-label="Уник. IP" className="py-2 pl-4 text-right text-text-secondary">{user.unique_ips ?? 0}</td>
       <td className="py-2 pl-4 text-right">
         {user.deleted ? (
           <span className="text-xs text-text-secondary">удалён</span>

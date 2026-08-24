@@ -8,6 +8,7 @@ import { OperationProgress } from '@/components/OperationProgress';
 import { mtproxylNetApi } from '@/lib/api';
 import { useMtproxylOperation } from '@/hooks/useMtproxyl';
 import { PageShell } from '@/components/layout/PageShell';
+import { EmptyState, SkeletonRows } from '@/components/ui/state';
 
 /** Turns a country code into its flag emoji via regional indicator symbols. */
 function flag(code: string): string {
@@ -129,9 +130,9 @@ export function GeoblockPage() {
         </CardHeader>
         <CardContent>
           {loading && countries.length === 0 ? (
-            <div className="text-sm text-text-secondary">Загрузка…</div>
+            <SkeletonRows />
           ) : countries.length === 0 ? (
-            <div className="text-sm text-text-secondary">Список пуст</div>
+            <EmptyState>Список пуст</EmptyState>
           ) : (
             <div className="flex flex-wrap gap-2">
               {countries.map((c) => (
