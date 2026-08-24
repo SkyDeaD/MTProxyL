@@ -68,7 +68,7 @@ export function UserCard({
   return (
     <div
       className={cn(
-        'glass rounded-card p-3 flex items-start gap-3',
+        'panel rounded-card p-3 flex items-start gap-3',
         'hover:border-border-hi hover:bg-surface-hover transition-colors',
         className,
       )}

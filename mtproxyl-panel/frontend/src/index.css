@@ -133,7 +133,7 @@
   --gl-sheen: rgba(255, 255, 255, .10);
   --gl-rim-a: rgba(255, 255, 255, .42);
   --gl-rim-b: rgba(255, 255, 255, .04);
-  --gl-blur: 30px;
+  --gl-blur: 16px;
 
   --sh-1: 0 1px 2px rgba(0, 0, 0, .45);
   --sh-2: 0 2px 8px rgba(0, 0, 0, .40), 0 18px 46px rgba(0, 0, 0, .45);
@@ -178,7 +178,7 @@
   --gl-sheen: rgba(255, 255, 255, .42);
   --gl-rim-a: rgba(255, 255, 255, 1);
   --gl-rim-b: rgba(16, 23, 37, .14);
-  --gl-blur: 30px;
+  --gl-blur: 16px;
 
   --sh-1: 0 1px 2px rgba(16, 23, 37, .05);
   --sh-2: 0 2px 6px rgba(16, 23, 37, .05), 0 14px 40px rgba(16, 23, 37, .09);
@@ -302,6 +302,16 @@
   .glass > *:not(.glass-raw) {
     position: relative;
     z-index: 1;
+  }
+
+  /* Плитка: облик стекла без его цены. Ставится там, где элементов десятки —
+     метрики, поля телеметрии, карточки пользователей. Под ними всё равно
+     лежит плавная подсветка, размывать в ней нечего. */
+  .panel {
+    position: relative;
+    background: linear-gradient(180deg, var(--gl-a), var(--gl-b));
+    border: 1px solid var(--gl-brd);
+    box-shadow: inset 0 1px 0 var(--gl-hi), inset 0 -1px 0 var(--gl-lo), var(--sh-1);
   }
   /* Браузеры без backdrop-filter (старый Firefox) получают плотную заливку —
      вёрстка не ломается, просто нет размытия. */
