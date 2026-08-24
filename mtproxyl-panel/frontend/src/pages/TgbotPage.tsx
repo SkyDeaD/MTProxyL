@@ -119,7 +119,7 @@ export function TgbotPage() {
   if (!supported) {
     return (
       <PageShell title="Телеграм-бот">
-        <Card className="p-6 text-sm text-text-secondary">{message}</Card>
+        <Card className="p-card text-sm text-text-secondary">{message}</Card>
       </PageShell>
     );
   }

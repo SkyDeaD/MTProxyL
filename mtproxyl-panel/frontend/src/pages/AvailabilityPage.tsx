@@ -118,11 +118,11 @@ export function AvailabilityPage() {
       {enabled && <TargetForm onSaved={load} />}
 
       {!enabled ? (
-        <Card className="p-6 text-sm text-text-secondary">
+        <Card className="p-card text-sm text-text-secondary">
           {message || 'Проверка доступности недоступна'}
         </Card>
       ) : !result ? (
-        <Card className="p-6 text-sm text-text-secondary text-center">
+        <Card className="p-card text-sm text-text-secondary text-center">
           {message || 'Проверки ещё не проводились'}
         </Card>
       ) : (

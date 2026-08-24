@@ -80,7 +80,7 @@ export function SecurityPage() {
           <p className="text-xs text-text-secondary/70 mb-4">
             Как движок сейчас настроен относительно доступа к API и сбора телеметрии.
           </p>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1">
             {POSTURE_ORDER.map((key) => (
               <TelemetryField
                 key={key}
@@ -126,7 +126,7 @@ export function SecurityPage() {
           {Object.keys(flatLimits).length === 0 ? (
             <div className="text-sm text-text-secondary">Лимиты не заданы</div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1">
               {Object.entries(flatLimits).map(([key, value]) => (
                 <TelemetryField key={key} fieldKey={key} value={value} variant="row" />
               ))}

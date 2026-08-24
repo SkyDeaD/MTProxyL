@@ -85,7 +85,7 @@ export function UpstreamsPage() {
           )}
 
           {upstreams.zero && (
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
               {Object.entries(upstreams.zero).map(([key, value]) => (
                 <MetricCard key={key} label={fieldMeta(key).label} value={formatFieldValue(key, value)} />
               ))}

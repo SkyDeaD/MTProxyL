@@ -109,7 +109,7 @@ export function BackupsPage() {
           ) : backups.length === 0 ? (
             <div className="text-sm text-text-secondary">Бэкапов пока нет</div>
           ) : (
-            <div className="overflow-x-auto -mx-4 px-4">
+            <div className="overflow-x-auto -mx-4 px-4 lg:-mx-6 lg:px-6">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-left text-text-secondary border-b border-border">

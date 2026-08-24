@@ -317,7 +317,7 @@ function DcCard({
     <CollapsibleSection
       title={`Дата-центры Telegram — покрытие ${coverage}%${ok ? '' : ' (просело)'}`}
     >
-      <div className="overflow-x-auto -mx-4 px-4">
+      <div className="overflow-x-auto -mx-4 px-4 lg:-mx-6 lg:px-6">
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-text-secondary border-b border-border">

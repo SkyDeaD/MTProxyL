@@ -44,7 +44,7 @@ export function AppLayout() {
         </div>
 
         {apiMismatch && (
-          <div className="m-4 rounded-lg border border-danger/40 bg-danger/10 p-4 flex items-start gap-3">
+          <div className="m-4 lg:m-6 rounded-lg border border-danger/40 bg-danger/10 p-4 flex items-start gap-3">
             <AlertTriangle size={18} className="text-danger shrink-0 mt-0.5" />
             <div className="min-w-0 space-y-1">
               <p className="text-sm text-text-primary">Данные могут быть от другого движка</p>

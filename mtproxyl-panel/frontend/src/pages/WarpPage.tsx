@@ -78,13 +78,13 @@ export function WarpPage() {
       {error && <ErrorAlert message={error} onRetry={load} />}
       <OperationProgress operation={operation} onDismiss={dismiss} />
 
-      {unsupported && <Card className="p-6 text-sm text-text-secondary">{unsupported}</Card>}
+      {unsupported && <Card className="p-card text-sm text-text-secondary">{unsupported}</Card>}
 
       {status && (
         <>
           <StateCard status={status} />
 
-          <Card className="p-4 space-y-3">
+          <Card className="p-card space-y-3">
             <div className="text-sm font-medium text-text-primary">Включение</div>
             <p className="text-xs text-text-secondary">
               Разведка занимает несколько минут — за ней можно следить в панели операции выше.
@@ -168,7 +168,7 @@ function StateCard({ status }: { status: WarpStatus }) {
     (status.mode === 'upstream' ? status.socks_active : status.nft_applied);
 
   return (
-    <Card className="p-4 space-y-3">
+    <Card className="p-card space-y-3">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="text-sm">
           <span className="text-text-primary font-medium">
@@ -187,7 +187,7 @@ function StateCard({ status }: { status: WarpStatus }) {
         </Badge>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 text-sm">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4 text-sm">
         <Cell label="Выход" value={status.exit.confirmed ? `${status.exit.ip}` : '—'} />
         <Cell
           label="Локация выхода"

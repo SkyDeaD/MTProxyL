@@ -101,7 +101,7 @@ export function MaintenancePage() {
         <div className="text-sm text-text-secondary">Загрузка…</div>
       ) : shown.length === 0 ? (
         <Card>
-          <CardContent className="p-4 text-sm text-text-secondary">
+          <CardContent className="p-card pt-0 text-sm text-text-secondary">
             MTProxyL не отдал ни одной из этих настроек — возможно, он старее панели.
           </CardContent>
         </Card>

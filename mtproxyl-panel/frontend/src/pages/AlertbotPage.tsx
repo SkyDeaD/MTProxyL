@@ -100,7 +100,7 @@ export function AlertbotPanel({
   if (!supported) {
     return (
       <Card>
-        <CardContent className="py-6 text-sm text-text-secondary">{message}</CardContent>
+        <CardContent className="p-card text-sm text-text-secondary">{message}</CardContent>
       </Card>
     );
   }
