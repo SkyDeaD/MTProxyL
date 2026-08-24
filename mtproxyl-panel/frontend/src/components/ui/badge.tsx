@@ -1,12 +1,17 @@
 import React from 'react'
 import { cn } from '@/lib/utils'
 
+/*
+  Бейдж по системе «Азур»: мягкая подложка того же цвета, что и текст, без
+  рамки. Рамка вокруг маленького цветного пятна добавляет третий контур и
+  делает строку рябой.
+*/
 const variantStyles = {
-  default: 'bg-accent/20 text-accent border-accent/30',
-  success: 'bg-success/20 text-success border-success/30',
-  warning: 'bg-warning/20 text-warning border-warning/30',
-  danger: 'bg-danger/20 text-danger border-danger/30',
-  outline: 'bg-transparent text-text-secondary border-border',
+  default: 'bg-accent/15 text-accent',
+  success: 'bg-success/15 text-success',
+  warning: 'bg-warning/15 text-warning',
+  danger: 'bg-danger/15 text-danger',
+  outline: 'bg-surface-hover text-text-secondary',
 }
 
 export interface BadgeProps extends React.HTMLAttributes<HTMLSpanElement> {
@@ -19,7 +24,7 @@ const Badge = React.forwardRef<HTMLSpanElement, BadgeProps>(
       <span
         ref={ref}
         className={cn(
-          'inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium transition-colors',
+          'inline-flex items-center gap-[5px] h-[21px] rounded-[7px] px-[7px] text-[10.5px] font-[640] whitespace-nowrap transition-colors',
           variantStyles[variant],
           className,
         )}

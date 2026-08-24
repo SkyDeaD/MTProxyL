@@ -8,9 +8,11 @@ const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
     return (
       <select
         ref={ref}
+        style={{ borderColor: 'var(--line)' }}
         className={cn(
-          'flex h-9 w-full rounded-md border border-border bg-surface px-3 py-1 text-sm text-text-primary shadow-sm',
-          'focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-1 focus:ring-offset-background',
+          'flex h-[34px] w-full rounded-[10px] border bg-surface-hover pl-[11px] pr-3 text-[12.5px] text-text-primary',
+          'transition-[border-color,box-shadow] duration-150',
+          'focus:outline-none focus:border-accent focus:shadow-[0_0_0_3px_var(--acc-soft)]',
           'disabled:cursor-not-allowed disabled:opacity-50',
           className,
         )}

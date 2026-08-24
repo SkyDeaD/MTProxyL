@@ -37,7 +37,7 @@ const DialogContent = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTML
     <div
       ref={ref}
       className={cn(
-        'relative z-50 w-full max-w-md rounded-lg border border-border bg-surface p-6 shadow-xl',
+        'glass relative z-50 w-full max-w-md rounded-[22px] p-6',
         className,
       )}
       {...props}
@@ -57,7 +57,7 @@ const DialogTitle = React.forwardRef<HTMLHeadingElement, React.HTMLAttributes<HT
   ({ className, ...props }, ref) => (
     <h2
       ref={ref}
-      className={cn('text-lg font-semibold leading-none tracking-tight text-text-primary', className)}
+      className={cn('text-[17px] font-[640] leading-none tracking-[-0.02em] text-text-primary', className)}
       {...props}
     />
   ),

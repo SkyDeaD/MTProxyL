@@ -461,7 +461,7 @@ export function UserDetailPage() {
 
             {/* GeoIP status banner */}
             {geoError && (
-              <div className="flex items-center gap-2 p-3 rounded-lg border border-yellow-500/30 bg-yellow-500/10 text-sm text-yellow-200">
+              <div className="flex items-center gap-2 p-3 rounded-lg border border-warning/30 bg-warning/10 text-sm text-warning">
                 <AlertTriangle size={16} className="shrink-0" />
                 <span>GeoIP недоступен: {geoError}. IP-адреса показаны без геоданных.</span>
               </div>

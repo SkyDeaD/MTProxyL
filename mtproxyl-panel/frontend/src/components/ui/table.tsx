@@ -6,7 +6,7 @@ const Table = React.forwardRef<HTMLTableElement, React.HTMLAttributes<HTMLTableE
     <div className="w-full overflow-auto">
       <table
         ref={ref}
-        className={cn('w-full caption-bottom text-sm', className)}
+        className={cn('w-full caption-bottom text-[12.5px]', className)}
         {...props}
       />
     </div>
@@ -16,7 +16,7 @@ Table.displayName = 'Table'
 
 const TableHeader = React.forwardRef<HTMLTableSectionElement, React.HTMLAttributes<HTMLTableSectionElement>>(
   ({ className, ...props }, ref) => (
-    <thead ref={ref} className={cn('bg-surface', className)} {...props} />
+    <thead ref={ref} className={cn(className)} {...props} />
   ),
 )
 TableHeader.displayName = 'TableHeader'
@@ -32,8 +32,9 @@ const TableRow = React.forwardRef<HTMLTableRowElement, React.HTMLAttributes<HTML
   ({ className, ...props }, ref) => (
     <tr
       ref={ref}
+      style={{ borderColor: 'var(--line-2)' }}
       className={cn(
-        'border-b border-border transition-colors hover:bg-surface-hover',
+        'border-b transition-colors hover:bg-surface-hover',
         className,
       )}
       {...props}
@@ -47,7 +48,8 @@ const TableHead = React.forwardRef<HTMLTableCellElement, React.ThHTMLAttributes<
     <th
       ref={ref}
       className={cn(
-        'h-10 px-3 text-left align-middle text-xs font-medium text-text-secondary',
+        'h-9 px-[18px] text-left align-middle whitespace-nowrap',
+        'text-[10px] font-[640] uppercase tracking-[0.09em] text-text-secondary',
         className,
       )}
       {...props}
@@ -60,7 +62,7 @@ const TableCell = React.forwardRef<HTMLTableCellElement, React.TdHTMLAttributes<
   ({ className, ...props }, ref) => (
     <td
       ref={ref}
-      className={cn('px-3 py-2 align-middle text-text-primary', className)}
+      className={cn('px-[18px] py-[11px] align-middle text-text-primary', className)}
       {...props}
     />
   ),

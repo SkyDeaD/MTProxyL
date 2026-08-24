@@ -28,12 +28,12 @@ export function AppLayout() {
   }
 
   return (
-    <div className="flex min-h-screen bg-background">
+    <div className="flex min-h-screen">
       <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
       <main className="flex-1 min-w-0 overflow-x-hidden lg:ml-60 pb-16 lg:pb-0">
         {/* Mobile header with hamburger */}
-        <div className="lg:hidden sticky top-0 z-20 bg-surface border-b border-border px-4 py-3 flex items-center gap-3">
+        <div className="glass lg:hidden sticky top-0 z-20 rounded-none border-x-0 border-t-0 px-4 py-3 flex items-center gap-3">
           <button
             onClick={() => setSidebarOpen(true)}
             className="p-2 hover:bg-surface-hover rounded-md"

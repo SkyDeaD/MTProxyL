@@ -10,7 +10,7 @@ interface QuotaBarProps {
 export function QuotaBar({ used, limit, className }: QuotaBarProps) {
   const pct = limit > 0 ? (used / limit) * 100 : 0;
   const clamped = Math.min(100, Math.max(0, pct));
-  const barColor = pct >= 100 ? 'bg-danger' : pct >= 80 ? 'bg-yellow-500' : 'bg-accent';
+  const barColor = pct >= 100 ? 'bg-danger' : pct >= 80 ? 'bg-warning' : 'bg-accent';
 
   return (
     <div className={cn('flex flex-col gap-1 min-w-[110px]', className)}>

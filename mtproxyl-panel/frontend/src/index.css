@@ -1,10 +1,39 @@
 @import 'tailwindcss';
 
+/* ═══════════════════════════════════════════════════════════════════════
+   Палитра «Азур» — та же дизайн-система, что в sharedd.
+   Тёмная тема базовая: панель чаще открывают ночью, и подсветка под
+   стеклом на ней выразительнее. Светлая включается классом .theme-light.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* Шрифт лежит рядом с панелью и попадает в бинарник вместе со сборкой
+   (embed.go тянет весь dist). CDN не используется: панель ставят на
+   серверы, у которых наружу может не быть ничего, кроме Telegram. */
+@font-face {
+  font-family: Inter;
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url(/fonts/inter-cyrillic.woff2) format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: Inter;
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url(/fonts/inter-latin.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215,
+    U+FEFF, U+FFFD;
+}
+
 /*
-  Colors are exposed to Tailwind as `rgb(var(--c-*))` via `@theme inline`, so
-  every utility (including opacity modifiers like `bg-success/10`) keeps a live
-  `var()` reference and follows the runtime theme instead of being baked to a
-  static value by the CSS minifier.
+  Цвета отдаются Tailwind как `rgb(var(--c-*))` через `@theme inline`, поэтому
+  любая утилита (включая модификаторы прозрачности вроде `bg-success/10`)
+  сохраняет живую ссылку на `var()` и следует теме, а не запекается
+  минификатором в статичное значение. Отсюда же требование к формату: тройка
+  «R G B» без функции, иначе модификаторы молча перестают работать.
 */
 @theme inline {
   --color-background: rgb(var(--c-background));
@@ -24,46 +53,103 @@
   --color-status-warn: rgb(var(--c-status-warn));
   --color-status-error: rgb(var(--c-status-error));
 
+  --font-sans: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+
   --animate-breathe: breathe 3s ease-in-out infinite;
   --animate-led-blink: led-blink 1.5s ease-in-out infinite;
 }
 
 :root, .theme-dark {
-  --c-background: 15 17 23;
-  --c-surface: 22 27 34;
-  --c-surface-hover: 28 35 51;
-  --c-border: 45 51 59;
+  color-scheme: dark;
+
+  --c-background: 8 10 15;
+  --c-surface: 18 21 29;
+  --c-surface-hover: 29 35 49;
+  --c-border: 39 43 52;
   --c-border-hi: 255 255 255;
-  --c-primary: 59 130 246;
-  --c-accent: 59 130 246;
-  --c-accent-hover: 37 99 235;
-  --c-text-primary: 230 237 243;
-  --c-text-secondary: 139 148 158;
-  --c-success: 34 197 94;
-  --c-warning: 234 179 8;
-  --c-danger: 239 68 68;
-  --c-status-ok: 52 211 153;
-  --c-status-warn: 245 158 11;
-  --c-status-error: 239 68 68;
+  --c-primary: 77 163 255;
+  --c-accent: 77 163 255;
+  --c-accent-hover: 46 139 240;
+  --c-text-primary: 238 241 246;
+  --c-text-secondary: 160 171 190;
+  --c-success: 61 220 151;
+  --c-warning: 251 191 36;
+  --c-danger: 255 112 137;
+  --c-status-ok: 61 220 151;
+  --c-status-warn: 251 191 36;
+  --c-status-error: 255 112 137;
+
+  /* Ниже — то, что нельзя выразить тройкой: полупрозрачные грани, стекло,
+     подсветка и тени. Они идут мимо @theme и зовутся напрямую. */
+  --line: rgba(255, 255, 255, .09);
+  --line-2: rgba(255, 255, 255, .05);
+  --acc-fg: #06121f;
+  --acc-soft: rgba(77, 163, 255, .16);
+
+  --amb-1: rgba(77, 163, 255, .40);
+  --amb-2: rgba(90, 200, 250, .26);
+  --amb-3: rgba(139, 139, 245, .30);
+  --dot: rgba(255, 255, 255, .075);
+
+  --gl-a: rgba(38, 44, 60, .62);
+  --gl-b: rgba(22, 27, 38, .52);
+  --gl-brd: rgba(255, 255, 255, .13);
+  --gl-hi: rgba(255, 255, 255, .18);
+  --gl-lo: rgba(0, 0, 0, .45);
+  --gl-sheen: rgba(255, 255, 255, .10);
+  --gl-rim-a: rgba(255, 255, 255, .42);
+  --gl-rim-b: rgba(255, 255, 255, .04);
+  --gl-blur: 30px;
+
+  --sh-1: 0 1px 2px rgba(0, 0, 0, .45);
+  --sh-2: 0 2px 8px rgba(0, 0, 0, .40), 0 18px 46px rgba(0, 0, 0, .45);
+  --sh-pop: 0 16px 44px rgba(0, 0, 0, .60);
 }
 
 .theme-light {
-  --c-background: 248 249 251;
+  color-scheme: light;
+
+  --c-background: 238 240 246;
   --c-surface: 255 255 255;
-  --c-surface-hover: 240 242 245;
-  --c-border: 216 221 228;
-  --c-border-hi: 216 221 228;
-  --c-primary: 37 99 235;
-  --c-accent: 37 99 235;
-  --c-accent-hover: 29 78 216;
-  --c-text-primary: 26 29 35;
-  --c-text-secondary: 92 99 112;
-  --c-success: 22 163 74;
-  --c-warning: 202 138 4;
-  --c-danger: 220 38 38;
-  --c-status-ok: 34 197 94;
-  --c-status-warn: 245 158 11;
-  --c-status-error: 239 68 68;
+  --c-surface-hover: 236 238 244;
+  --c-border: 224 227 233;
+  --c-border-hi: 203 208 218;
+  --c-primary: 10 111 255;
+  --c-accent: 10 111 255;
+  --c-accent-hover: 10 90 214;
+  --c-text-primary: 16 23 37;
+  --c-text-secondary: 87 98 122;
+  --c-success: 10 138 95;
+  --c-warning: 182 116 11;
+  --c-danger: 209 52 75;
+  --c-status-ok: 10 138 95;
+  --c-status-warn: 182 116 11;
+  --c-status-error: 209 52 75;
+
+  --line: rgba(17, 24, 39, .09);
+  --line-2: rgba(17, 24, 39, .05);
+  --acc-fg: #ffffff;
+  --acc-soft: rgba(10, 111, 255, .11);
+
+  --amb-1: rgba(10, 111, 255, .34);
+  --amb-2: rgba(56, 189, 248, .30);
+  --amb-3: rgba(91, 91, 214, .24);
+  --dot: rgba(16, 23, 37, .10);
+
+  --gl-a: rgba(255, 255, 255, .74);
+  --gl-b: rgba(255, 255, 255, .52);
+  --gl-brd: rgba(255, 255, 255, .75);
+  --gl-hi: rgba(255, 255, 255, .92);
+  --gl-lo: rgba(16, 23, 37, .07);
+  --gl-sheen: rgba(255, 255, 255, .42);
+  --gl-rim-a: rgba(255, 255, 255, 1);
+  --gl-rim-b: rgba(16, 23, 37, .14);
+  --gl-blur: 30px;
+
+  --sh-1: 0 1px 2px rgba(16, 23, 37, .05);
+  --sh-2: 0 2px 6px rgba(16, 23, 37, .05), 0 14px 40px rgba(16, 23, 37, .09);
+  --sh-pop: 0 12px 34px rgba(16, 23, 37, .16);
 }
 
 @keyframes breathe {
@@ -80,14 +166,57 @@
   * {
     border-color: rgb(var(--c-border));
   }
+  /* Фон живёт на html, а не на body: псевдоэлемент с z-index:-1 иначе
+     прячется за собственный фон body — подсветки не видно вовсе. */
+  html {
+    background: rgb(var(--c-background));
+    -webkit-text-size-adjust: 100%;
+  }
   body {
-    @apply bg-background text-text-primary antialiased;
+    @apply text-text-primary antialiased;
+    font-family: var(--font-sans);
+    background: transparent;
+  }
+  /* Цветная подсветка — то, что размывает стекло. */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: -20% -10%;
+    z-index: -1;
+    pointer-events: none;
+    background:
+      radial-gradient(46rem 30rem at 12% -8%, var(--amb-1), transparent 60%),
+      radial-gradient(40rem 26rem at 88% 2%, var(--amb-2), transparent 58%),
+      radial-gradient(44rem 30rem at 62% 108%, var(--amb-3), transparent 60%);
+  }
+  /* Точечная сетка: один повторяющийся градиент, гаснет к низу экрана. */
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background-image: radial-gradient(circle at 1px 1px, var(--dot) 1px, transparent 0);
+    background-size: 26px 26px;
+    -webkit-mask-image: radial-gradient(130% 85% at 50% 0%, #000 28%, transparent 76%);
+    mask-image: radial-gradient(130% 85% at 50% 0%, #000 28%, transparent 76%);
+  }
+  h1, h2, h3 {
+    font-weight: 640;
+    letter-spacing: -0.02em;
+  }
+  ::selection {
+    background: var(--acc-soft);
+  }
+  :focus-visible {
+    outline: 2px solid rgb(var(--c-accent));
+    outline-offset: 2px;
   }
   ::-webkit-scrollbar {
     @apply w-2;
   }
   ::-webkit-scrollbar-track {
-    @apply bg-background;
+    background: transparent;
   }
   ::-webkit-scrollbar-thumb {
     @apply bg-border rounded-full;
@@ -98,10 +227,90 @@
 }
 
 @layer components {
+  /* ═══ Стекло ═════════════════════════════════════════════════════════
+     Полупрозрачность сама по себе стеклом не выглядит. Нужны четыре вещи:
+     градиентная заливка, блик по верхней кромке, тень по нижней и
+     градиентная грань — светлая с одной стороны, тёмная с другой.
+     Последнюю глаз читает как преломление света на ребре. */
+  .glass {
+    position: relative;
+    overflow: hidden;
+    background: linear-gradient(180deg, var(--gl-a), var(--gl-b));
+    border: 1px solid var(--gl-brd);
+    box-shadow: inset 0 1px 0 var(--gl-hi), inset 0 -1px 0 var(--gl-lo), var(--sh-2);
+    -webkit-backdrop-filter: blur(var(--gl-blur)) saturate(190%);
+    backdrop-filter: blur(var(--gl-blur)) saturate(190%);
+  }
+  /* грань */
+  .glass::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    pointer-events: none;
+    z-index: 2;
+    background: linear-gradient(142deg, var(--gl-rim-a) 0%, transparent 34%,
+                                        transparent 66%, var(--gl-rim-b) 100%);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask-composite: exclude;
+  }
+  /* диагональный отсвет */
+  .glass::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    background: linear-gradient(125deg, var(--gl-sheen) 0%, transparent 34%);
+  }
+  .glass > *:not(.glass-raw) {
+    position: relative;
+    z-index: 1;
+  }
+  /* Браузеры без backdrop-filter (старый Firefox) получают плотную заливку —
+     вёрстка не ломается, просто нет размытия. */
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .glass {
+      background: rgb(var(--c-surface));
+    }
+  }
+
   .input {
-    @apply w-full px-3 py-2 bg-surface border border-border rounded-lg text-text-primary placeholder-text-secondary focus:outline-hidden focus:ring-2 focus:ring-primary/50 transition-colors;
+    @apply w-full px-3 py-2 rounded-lg text-text-primary placeholder-text-secondary transition-colors;
+    height: 34px;
+    background: rgb(var(--c-surface-hover));
+    border: 1px solid var(--line);
+    font-size: 12.5px;
+  }
+  .input:focus {
+    outline: none;
+    border-color: rgb(var(--c-accent));
+    box-shadow: 0 0 0 3px var(--acc-soft);
+  }
+  textarea.input {
+    height: auto;
+    min-height: 84px;
+    line-height: 1.5;
   }
   .checkbox {
-    @apply w-4 h-4 rounded-sm border-border bg-surface text-primary focus:ring-2 focus:ring-primary/50 cursor-pointer;
+    @apply w-4 h-4 rounded-sm text-primary cursor-pointer;
+    background: rgb(var(--c-surface-hover));
+    border: 1px solid var(--line);
+  }
+  .checkbox:focus {
+    outline: none;
+    box-shadow: 0 0 0 3px var(--acc-soft);
+  }
+  /* Машинные строки — адреса, секреты, ссылки. */
+  .mono {
+    font-family: var(--font-mono);
+    font-size: 0.92em;
+    letter-spacing: -0.015em;
+  }
+  .num {
+    font-variant-numeric: tabular-nums;
   }
 }

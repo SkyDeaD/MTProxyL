@@ -33,16 +33,16 @@ export function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background">
+    <div className="min-h-screen flex items-center justify-center">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
-          <h1 className="text-2xl font-bold text-text-primary">{name}</h1>
+          <h1 className="text-2xl font-[640] tracking-[-0.02em] text-text-primary">{name}</h1>
           <p className="text-sm text-text-secondary mt-1">Управление MTProxy</p>
         </div>
 
         <form
           onSubmit={handleSubmit}
-          className="bg-surface border border-border rounded-lg p-6 space-y-4"
+          className="glass rounded-[22px] p-6 space-y-4"
         >
           <div className="space-y-2">
             <Label htmlFor="username">Имя пользователя</Label>

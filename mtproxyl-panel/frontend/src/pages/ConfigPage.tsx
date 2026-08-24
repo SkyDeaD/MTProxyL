@@ -144,7 +144,7 @@ export function ConfigPage() {
   if (error && !currentContent) {
     return (
       <div className="flex items-center justify-center h-full">
-        <div className="text-red-500">{error}</div>
+        <div className="text-danger">{error}</div>
       </div>
     );
   }
@@ -289,7 +289,7 @@ export function ConfigPage() {
       </div>
 
       {hasChanges && (
-        <div className="px-4 py-2 bg-yellow-500/10 border-t border-yellow-500/20 text-sm text-yellow-600">
+        <div className="px-4 py-2 bg-warning/10 border-t border-warning/20 text-sm text-warning">
           Есть несохранённые изменения
         </div>
       )}

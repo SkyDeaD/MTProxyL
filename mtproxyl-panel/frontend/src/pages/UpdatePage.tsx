@@ -221,9 +221,9 @@ function VersionSelect({
   }
   if (error) {
     return (
-      <div className="text-sm text-red-400">
+      <div className="text-sm text-danger">
         {error}{' '}
-        <button onClick={onRetry} className="underline hover:text-red-300">
+        <button onClick={onRetry} className="underline hover:text-danger/80">
           Повторить
         </button>
       </div>
