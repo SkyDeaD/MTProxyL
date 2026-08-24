@@ -393,6 +393,22 @@ _validate_f32_0_1() {
     awk -v v="$1" 'BEGIN{exit !(v >= 0.0 && v <= 1.0)}' || { echo "Диапазон: 0.0..1.0"; return 1; }
 }
 
+# Параметр вне каталога: проверить значение нечем, но форму сверяем — иначе
+# запись поломает либо файл override'ов (разделитель «|»), либо сам TOML.
+_expert_validate_raw() {
+    local _sec="$1" _key="$2" _val="$3"
+    [[ "$_sec" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]*$ ]] || {
+        log_error "Секция: буквы, цифры, точка, дефис и подчёркивание"; return 1; }
+    case "$_key" in
+        *"|"*|*'"'*|*[[:space:]]*|"")
+            log_error "Ключ не может быть пустым и содержать пробелы, кавычки или «|»"; return 1 ;;
+    esac
+    case "$_val" in
+        *"|"*) log_error "Значение не может содержать «|» — это разделитель в файле override"; return 1 ;;
+    esac
+    return 0
+}
+
 # Главная функция валидации по типу из каталога
 _expert_validate() {
     local validator="$1" value="$2"
@@ -424,6 +440,27 @@ _expert_validate() {
             fi ;;
         *) return 0 ;;
     esac
+}
+
+# Хотя бы один активный override без hot-reload — SIGHUP его не подхватит:
+# конфиг на диске обновится, а в памяти работающего процесса останется старое
+# значение до полного mtproxyl restart. Параметр вне каталога (--raw) тоже
+# считаем таким: ручаться, что движок примет его на лету, нечем.
+_expert_needs_restart() {
+    [ -f "$EXPERT_OVERRIDES_FILE" ] || return 1
+    local _s _k _v _entry
+    while IFS='|' read -r _s _k _v; do
+        [[ "$_s" =~ ^[[:space:]]*# ]] && continue
+        [[ "$_s" =~ ^[[:space:]]*$ ]] && continue
+        [ -z "$_k" ] && continue
+        _entry=$(_expert_find "$_s" "$_k" 2>/dev/null)
+        if [ -z "$_entry" ]; then
+            return 0
+        fi
+        _expert_parse "$_entry"
+        [ "$EXPERT_P_HOT" != "✔" ] && return 0
+    done < "$EXPERT_OVERRIDES_FILE"
+    return 1
 }
 
 # Поиск записи в каталоге

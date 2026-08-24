@@ -112,6 +112,8 @@ panel_listen_addr() {
             local _ip; _ip=$(CUSTOM_IP="" get_public_ip 2>/dev/null)
             [ -n "$_ip" ] || _ip=$(hostname -I 2>/dev/null | awk '{print $1}')
             [ -n "$_ip" ] || _ip="<адрес-сервера>"
+            # IPv6 без скобок склеивается с портом в нерабочую ссылку.
+            case "$_ip" in *:*:*) _ip="[${_ip}]" ;; esac
             echo "${_ip}:${_port}"
             ;;
         *) echo "$_listen" ;;
@@ -134,12 +136,19 @@ panel_scheme() {
 panel_install() {
     check_root || return 1
 
+    # --update: то же самое, но без вопроса «ставить поверх?» — при обновлении
+    # ответ на него заранее известен.
+    local _mode="${1:-}"
     if panel_installed; then
         log_info "Панель уже установлена: $(panel_status_line)"
-        echo ""
-        echo -en "  ${BOLD}Запустить установщик повторно (обновление/перенастройка)? [y/N]:${NC} "
-        local _yn; read_line _yn
-        [[ "$_yn" =~ ^[yY] ]] || { log_info "Отменено"; return 0; }
+        if [ "$_mode" != "--update" ]; then
+            echo ""
+            echo -en "  ${BOLD}Запустить установщик повторно (обновление/перенастройка)? [y/N]:${NC} "
+            local _yn; read_line _yn
+            [[ "$_yn" =~ ^[yY] ]] || { log_info "Отменено"; return 0; }
+        fi
+    elif [ "$_mode" = "--update" ]; then
+        log_info "Панель ещё не установлена — ставим с нуля"
     fi
 
     if [ "${MTPROXYL_MODE:-manager}" = "manager" ] && ! _own_install_exists; then
@@ -191,11 +200,7 @@ panel_install() {
     if [ "$GITHUB_BRANCH" != "main" ]; then
         log_info "CLI установлен из ветки ${GITHUB_BRANCH} — собираем панель из тех же исходников"
         log_info "(релиз панели собран с main и может не содержать правок этой ветки)"
-        if command -v docker &>/dev/null && docker info &>/dev/null 2>&1; then
-            log_info "Сборка пойдёт в Docker — тулчейн на сервере не останется"
-        else
-            log_warn "Docker недоступен: понадобятся Go 1.25+ и Node.js 20+ на сервере"
-        fi
+        _panel_report_build_toolchain
         log_info "Нужен git; сборка занимает несколько минут"
 
         sh "$_tmp" install "--from-source=${GITHUB_BRANCH}" \
@@ -216,11 +221,7 @@ panel_install() {
     log_warn "Установка из релиза не удалась (причина выше)"
     echo ""
     log_info "Панель можно собрать из исходников ветки ${GITHUB_BRANCH}"
-    if command -v docker &>/dev/null && docker info &>/dev/null 2>&1; then
-        log_info "Сборка пойдёт в Docker — тулчейн на сервере не останется"
-    else
-        log_warn "Docker недоступен: понадобятся Go 1.25+ и Node.js 20+ на сервере"
-    fi
+    _panel_report_build_toolchain
     log_info "Нужен git; сборка занимает несколько минут"
     echo -en "  ${BOLD}Собрать из исходников? [y/N]:${NC} "
     local _yn; read_line _yn
@@ -229,6 +230,21 @@ panel_install() {
     sh "$_tmp" install "--from-source=${GITHUB_BRANCH}" \
         || { log_error "Сборка из исходников не удалась (причина выше)"; return 1; }
     _panel_install_report
+}
+
+# Чем будет собираться панель из исходников. С движком-бинарником Docker на
+# сервере может не быть вовсе — тогда нужен тулчейн, и сказать об этом надо
+# до запуска сборки, а не после её падения.
+_panel_report_build_toolchain() {
+    if command -v docker &>/dev/null && docker info &>/dev/null 2>&1; then
+        log_info "Сборка пойдёт в Docker — тулчейн на сервере не останется"
+        return 0
+    fi
+    log_warn "Docker недоступен: понадобятся Go 1.25+ и Node.js 20+ на сервере"
+    if engine_is_binary; then
+        log_info "Движок работает бинарником, поэтому Docker здесь не ставился"
+        log_info "Либо поставьте Go и Node.js, либо Docker — только ради сборки панели"
+    fi
 }
 
 _panel_install_report() {
@@ -264,6 +280,13 @@ _panel_offer_cert_after_install() {
     panel_installed || return 0
     local _cfg="${PANEL_CONFIG_DIR}/config.toml"
     [ -f "$_cfg" ] || return 0
+    # Отвечать некому — не начинаем выпуск сам собой: при переезде A-запись
+    # ещё смотрит на старый сервер, и certbot только зря сходит к Let's Encrypt.
+    if [ "${MTPROXYL_NONINTERACTIVE:-false}" = "true" ] || [ ! -t 0 ]; then
+        _panel_config_self_signed && \
+            log_info "Сертификат: панель на самоподписанном, выпустить — mtproxyl panel cert <домен>"
+        return 0
+    fi
 
     local _domain _reason=""
     if grep -qE '^[[:space:]]*acme_domain[[:space:]]*=' "$_cfg" 2>/dev/null; then
@@ -279,6 +302,9 @@ _panel_offer_cert_after_install() {
         return 0
     fi
     [ -n "$_domain" ] && validate_domain "$_domain" || return 0
+    # Let's Encrypt не выдаёт сертификаты на голый IP, а панель по IP —
+    # обычный и осознанный выбор: предлагать тут нечего.
+    validate_ip_literal "$_domain" && return 0
 
     echo ""
     log_warn "Сертификат для ${_domain} не выпущен: ${_reason}"
@@ -337,17 +363,58 @@ panel_uninstall() {
         log_warn "Установщик недоступен, удаляем вручную"
         systemctl disable --now "$PANEL_SERVICE" &>/dev/null || true
         rm -f "$PANEL_BINARY" "/etc/systemd/system/${PANEL_SERVICE}.service"
-        rm -f "/etc/sudoers.d/${PANEL_SERVICE}" "/etc/sudoers.d/${PANEL_SERVICE}-mtproxyl"
+        rm -f "/etc/sudoers.d/${PANEL_SERVICE}" "/etc/sudoers.d/${PANEL_SERVICE}-mtproxyl" \
+              "/etc/sudoers.d/${PANEL_SERVICE}-engine"
         systemctl daemon-reload &>/dev/null || true
     fi
     log_success "Панель удалена"
+}
+
+# Права панели на журнал бинарного движка. Установщик панели прописывает их
+# сам, но движок можно сменить и после установки панели — тогда логи движка
+# в ней замолкают, пока не появится это правило.
+panel_grant_engine_journal() {
+    panel_installed 2>/dev/null || return 0
+    command -v systemctl &>/dev/null || return 0
+    local _user; _user=$(_panel_system_user)
+    [ -n "$_user" ] || return 0
+    local _sc _jc
+    _sc=$(command -v systemctl); _jc=$(command -v journalctl)
+    [ -n "$_sc" ] && [ -n "$_jc" ] || return 0
+
+    local _f="/etc/sudoers.d/${PANEL_SERVICE}-engine"
+    local _tmp; _tmp=$(_mktemp) || return 1
+    cat > "$_tmp" <<SUDO_EOF
+# MTProxyL: журнал движка ${ENGINE_SERVICE}.service для веб-панели
+${_user} ALL=(root) NOPASSWD: ${_sc} restart ${ENGINE_SERVICE}
+${_user} ALL=(root) NOPASSWD: ${_sc} start ${ENGINE_SERVICE}
+${_user} ALL=(root) NOPASSWD: ${_jc} -u ${ENGINE_SERVICE} -n * --no-pager -o short-iso
+${_user} ALL=(root) NOPASSWD: ${_jc} -u ${ENGINE_SERVICE} -n * --since * --no-pager -o short-iso
+${_user} ALL=(root) NOPASSWD: ${_jc} -u ${ENGINE_SERVICE} -f --no-pager -o short-iso
+${_user} ALL=(root) NOPASSWD: ${_jc} -u ${ENGINE_SERVICE} -f --since * --no-pager -o short-iso
+SUDO_EOF
+    if command -v visudo &>/dev/null && ! visudo -cf "$_tmp" >/dev/null 2>&1; then
+        log_warn "Правило sudo для журнала движка отклонено visudo — пропускаем"
+        rm -f "$_tmp"; return 1
+    fi
+    install -m 0440 "$_tmp" "$_f" && rm -f "$_tmp" \
+        && log_success "Панель получила доступ к журналу ${ENGINE_SERVICE}"
+}
+
+# Пользователь, от которого работает панель: в юните он и записан.
+_panel_system_user() {
+    local _u
+    _u=$(systemctl show "$PANEL_SERVICE" -p User --value 2>/dev/null)
+    [ -n "$_u" ] && { echo "$_u"; return 0; }
+    grep -oE '^[[:space:]]*User=.*' "/etc/systemd/system/${PANEL_SERVICE}.service" 2>/dev/null \
+        | head -1 | cut -d= -f2- | tr -d ' '
 }
 
 # Отключить интеграцию с MTProxyL, не удаляя панель. Нужно при удалении
 # MTProxyL: иначе остаётся sudoers на путь, которого больше нет, и он
 # сработает, если путь появится снова.
 _panel_detach_mtproxyl() {
-    rm -f "/etc/sudoers.d/${PANEL_SERVICE}-mtproxyl"
+    rm -f "/etc/sudoers.d/${PANEL_SERVICE}-mtproxyl" "/etc/sudoers.d/${PANEL_SERVICE}-engine"
 
     local _cfg="${PANEL_CONFIG_DIR}/config.toml"
     if [ -f "$_cfg" ]; then
@@ -645,6 +712,11 @@ panel_issue_cert() {
         log_error "Некорректный домен: ${_domain}"
         return 1
     fi
+    if validate_ip_literal "$_domain"; then
+        log_error "${_domain} — это IP-адрес, а Let's Encrypt на голый IP сертификаты не выдаёт"
+        log_info "Нужен домен с A-записью на этот сервер; по IP панель работает на самоподписанном"
+        return 1
+    fi
 
     local _lineage="/etc/letsencrypt/live/${_domain}"
 
@@ -763,6 +835,7 @@ _panel_finish_cert() {
 handle_panel_command() {
     case "${1:-status}" in
         install)   panel_install ;;
+        update)    panel_install --update ;;
         uninstall) panel_uninstall ;;
         restart)   panel_restart ;;
         disable|off) panel_disable ;;
@@ -774,6 +847,7 @@ handle_panel_command() {
             echo -e "  ${BOLD}MTProxyL-Panel (веб-панель):${NC}"
             echo -e "    ${GREEN}panel status${NC}     Состояние"
             echo -e "    ${GREEN}panel install${NC}    Установить / переустановить"
+            echo -e "    ${GREEN}panel update${NC}     Обновить до последней версии"
             echo -e "    ${GREEN}panel restart${NC}    Перезапустить"
             echo -e "    ${GREEN}panel disable${NC}    Выключить, не удаляя (снять с автозапуска)"
             echo -e "    ${GREEN}panel enable${NC}     Включить обратно"

@@ -113,7 +113,12 @@ detect_arch() {
 
 # ── Telemt binary location ───────────────────────────────────────────────────
 detect_telemt() {
+  # Свой бинарник MTProxyL ищем первым только в режиме Manager: в Reanimator
+  # цель чужая, и подсунуть вместо неё движок менеджера нельзя.
+  _own_first=""
+  [ "${MTPROXYL_MODE_DETECTED:-}" = "manager" ] && _own_first="$MTPROXYL_INSTALL_DIR/engine/mtproxyl-telemt"
   for _candidate in \
+    $_own_first \
     "$BIN_DIR/telemt" \
     "$LEGACY_BIN_DIR/telemt" \
     /bin/telemt \
@@ -131,7 +136,9 @@ detect_telemt() {
 # разными именами, а панель по этому имени перезапускает движок — ошибиться
 # здесь значит получить нерабочую кнопку перезапуска.
 detect_telemt_service() {
-  for _unit in telemt mtproxy-telemt telemt-server; do
+  _units="telemt mtproxy-telemt telemt-server"
+  [ "${MTPROXYL_MODE_DETECTED:-}" = "manager" ] && _units="mtproxyl-telemt $_units"
+  for _unit in $_units; do
     if systemctl list-unit-files "${_unit}.service" 2>/dev/null | grep -q "^${_unit}.service"; then
       echo "$_unit"
       return
@@ -168,6 +175,13 @@ port_is_listening() {
 # «API не отвечает».
 engine_looks_running() {
   if [ "$MTPROXYL_MODE_DETECTED" = "manager" ]; then
+    # В Manager движок бывает и контейнером, и службой MTProxyL-Telemt —
+    # что именно, говорит сам MTProxyL в 'mode --json'.
+    if [ "${LOG_KIND_DETECTED:-docker}" = "service" ]; then
+      command -v systemctl >/dev/null 2>&1 || return 2
+      $SUDO systemctl is-active --quiet "${LOG_TARGET_DETECTED:-mtproxyl-telemt}" 2>/dev/null && return 0
+      return 1
+    fi
     command -v docker >/dev/null 2>&1 || return 2
     $SUDO docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "mtproxyl" && return 0
     return 1
@@ -244,9 +258,9 @@ join_telemt_group() {
       say "Пользователь '$SYSTEM_USER' добавлен в группу '$_telemt_group' для доступа к конфигу telemt"
     fi
   elif [ "$MTPROXYL_MODE_DETECTED" = "manager" ]; then
-    # В режиме Manager движок живёт в Docker: ни группы telemt, ни конфига на
-    # хосте нет и быть не должно. Предупреждать не о чем — панель читает конфиг
-    # через CLI MTProxyL, а логи из контейнера.
+    # В режиме Manager движок наш: ни группы telemt, ни её конфига на хосте
+    # нет и быть не должно. Панель читает конфиг через CLI MTProxyL, а логи —
+    # из контейнера либо из журнала mtproxyl-telemt.service.
     :
   else
     say "ВНИМАНИЕ: группа telemt не найдена — панель не получит доступ к конфигу telemt"
@@ -422,6 +436,19 @@ $SYSTEM_USER ALL=(root) NOPASSWD: $_journalctl -u $_telemt_service -f --no-pager
 $SYSTEM_USER ALL=(root) NOPASSWD: $_journalctl -u $_telemt_service -f --since * --no-pager -o short-iso
 EOF
 
+  # Движок Manager'а можно переключить с Docker на бинарник уже после
+  # установки панели — тогда логи придут из mtproxyl-telemt.service.
+  if [ "$_telemt_service" != "mtproxyl-telemt" ]; then
+    cat >>"$_tmp" <<EOF
+$SYSTEM_USER ALL=(root) NOPASSWD: $_systemctl restart mtproxyl-telemt
+$SYSTEM_USER ALL=(root) NOPASSWD: $_systemctl start mtproxyl-telemt
+$SYSTEM_USER ALL=(root) NOPASSWD: $_journalctl -u mtproxyl-telemt -n * --no-pager -o short-iso
+$SYSTEM_USER ALL=(root) NOPASSWD: $_journalctl -u mtproxyl-telemt -n * --since * --no-pager -o short-iso
+$SYSTEM_USER ALL=(root) NOPASSWD: $_journalctl -u mtproxyl-telemt -f --no-pager -o short-iso
+$SYSTEM_USER ALL=(root) NOPASSWD: $_journalctl -u mtproxyl-telemt -f --since * --no-pager -o short-iso
+EOF
+  fi
+
   # Прямая запись конфига движка нужна только без MTProxyL: с ним панель идёт
   # через 'target-config write', а тот проверяет текст и делает резервную копию.
   if [ "${MTPROXYL_ENABLED:-false}" != "true" ]; then
@@ -534,6 +561,18 @@ $SYSTEM_USER ALL=(root) NOPASSWD: $_script nft zapret2-wscale
 $SYSTEM_USER ALL=(root) NOPASSWD: $_script geoblock list --json
 $SYSTEM_USER ALL=(root) NOPASSWD: $_script geoblock add [a-z][a-z]
 $SYSTEM_USER ALL=(root) NOPASSWD: $_script geoblock remove [a-z][a-z]
+$SYSTEM_USER ALL=(root) NOPASSWD: $_script block status --json
+$SYSTEM_USER ALL=(root) NOPASSWD: $_script block export
+$SYSTEM_USER ALL=(root) NOPASSWD: $_script block hits --tsv
+$SYSTEM_USER ALL=(root) NOPASSWD: $_script block on
+$SYSTEM_USER ALL=(root) NOPASSWD: $_script block off
+$SYSTEM_USER ALL=(root) NOPASSWD: $_script block action drop
+$SYSTEM_USER ALL=(root) NOPASSWD: $_script block action reject
+$SYSTEM_USER ALL=(root) NOPASSWD: $_script block add *
+$SYSTEM_USER ALL=(root) NOPASSWD: $_script block add * *
+$SYSTEM_USER ALL=(root) NOPASSWD: $_script block del *
+$SYSTEM_USER ALL=(root) NOPASSWD: $_script block import - replace
+$SYSTEM_USER ALL=(root) NOPASSWD: $_script block import - append
 $SYSTEM_USER ALL=(root) NOPASSWD: $_script geoip status --json
 $SYSTEM_USER ALL=(root) NOPASSWD: $_script geoip install
 $SYSTEM_USER ALL=(root) NOPASSWD: $_script upstream list --json
@@ -564,6 +603,19 @@ $SYSTEM_USER ALL=(root) NOPASSWD: $_script pq-check [A-Za-z0-9]*
 # скрипт заканчивает работу exec в интерактивное меню.
 $SYSTEM_USER ALL=(root) NOPASSWD: $_script update-check
 $SYSTEM_USER ALL=(root) NOPASSWD: $_script update --no-restart
+# Версия движка: список, установка и откат. Откат без аргумента — на
+# предыдущую, с аргументом — на образ, который уже лежит на диске.
+$SYSTEM_USER ALL=(root) NOPASSWD: $_script engine versions
+$SYSTEM_USER ALL=(root) NOPASSWD: $_script engine update [A-Za-z0-9._-]*
+$SYSTEM_USER ALL=(root) NOPASSWD: $_script engine rollback --yes
+$SYSTEM_USER ALL=(root) NOPASSWD: $_script engine rollback [A-Za-z0-9._-]*
+# Сброс накопленной статистики. Настройки и пользователи не затрагиваются.
+$SYSTEM_USER ALL=(root) NOPASSWD: $_script stats --json
+$SYSTEM_USER ALL=(root) NOPASSWD: $_script stats reset all
+$SYSTEM_USER ALL=(root) NOPASSWD: $_script stats reset traffic
+$SYSTEM_USER ALL=(root) NOPASSWD: $_script stats reset ips
+$SYSTEM_USER ALL=(root) NOPASSWD: $_script stats reset orphans
+$SYSTEM_USER ALL=(root) NOPASSWD: $_script stats reset user *
 # Доступность из России. Проверку ведёт MTProxyL — тем же результатом
 # пользуются телеграм-бот и меню, а панель только показывает и просит проверить.
 $SYSTEM_USER ALL=(root) NOPASSWD: $_script availability status --json
@@ -577,6 +629,7 @@ $SYSTEM_USER ALL=(root) NOPASSWD: $_script availability token *
 $SYSTEM_USER ALL=(root) NOPASSWD: $_script warp status --json
 $SYSTEM_USER ALL=(root) NOPASSWD: $_script warp on socks
 $SYSTEM_USER ALL=(root) NOPASSWD: $_script warp on iface
+$SYSTEM_USER ALL=(root) NOPASSWD: $_script warp on upstream
 $SYSTEM_USER ALL=(root) NOPASSWD: $_script warp off
 $SYSTEM_USER ALL=(root) NOPASSWD: $_script warp scan
 $SYSTEM_USER ALL=(root) NOPASSWD: $_script warp reapply
@@ -644,6 +697,10 @@ $SYSTEM_USER ALL=(root) NOPASSWD: /bin/systemctl enable mtproxyl-alertbot.servic
 $SYSTEM_USER ALL=(root) NOPASSWD: /bin/systemctl disable mtproxyl-alertbot.service
 $SYSTEM_USER ALL=(root) NOPASSWD: /usr/bin/systemctl enable mtproxyl-alertbot.service
 $SYSTEM_USER ALL=(root) NOPASSWD: /usr/bin/systemctl disable mtproxyl-alertbot.service
+# proxy — единственная настройка без точки в имени, под шаблон выше она
+# не подходила, и панель не могла её задать.
+$SYSTEM_USER ALL=(root) NOPASSWD: $_script tgbot set proxy *
+$SYSTEM_USER ALL=(root) NOPASSWD: $_script tgbot set proxy
 EOF
 
   if [ -n "$_visudo" ]; then
@@ -752,6 +809,8 @@ detect_from_mtproxyl() {
   MTPROXYL_MODE_DETECTED=""
   API_PORT_DETECTED=""
   API_ENABLED_DETECTED=""
+  LOG_KIND_DETECTED=""
+  LOG_TARGET_DETECTED=""
 
   mtproxyl_present || return 1
 
@@ -764,6 +823,8 @@ detect_from_mtproxyl() {
   API_PORT_DETECTED=$(printf '%s' "$_json" | sed -n 's/.*"api_port"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p')
   API_ENABLED_DETECTED=$(printf '%s' "$_json" | sed -n 's/.*"api_enabled"[[:space:]]*:[[:space:]]*\(true\|false\).*/\1/p')
   ENGINE_CONFIG_DETECTED=$(printf '%s' "$_json" | sed -n 's/.*"engine_config"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+  LOG_KIND_DETECTED=$(printf '%s' "$_json" | sed -n 's/.*"log_kind"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+  LOG_TARGET_DETECTED=$(printf '%s' "$_json" | sed -n 's/.*"log_target"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
 
   # Заголовок авторизации читаем прямо из конфига движка, а не из вывода
   # 'mode --json': панель опрашивает его постоянно, и секрету незачем
@@ -1278,10 +1339,9 @@ session_ttl = \"24h\"${TLS_BLOCK}"
   generate_service | write_root "$SERVICE_FILE"
   $SUDO systemctl daemon-reload
   $SUDO systemctl enable "$SERVICE_NAME"
-  # restart, а не start: при переустановке поверх работающей панели бинарник на
-  # диске уже подменён, но systemd для активного юнита ничего не делает — и в
-  # памяти остаётся прежний процесс со старым вшитым интерфейсом. Со стороны
-  # это выглядит как «установщик соврал».
+  # Именно restart: при повторной установке бинарник уже заменён, но старый
+  # процесс держит прежний inode, и `start` для него — пустая команда.
+  # Панель после этого продолжала показывать старую версию.
   $SUDO systemctl restart "$SERVICE_NAME"
   say "Служба $SERVICE_NAME запущена и включена в автозагрузку"
 

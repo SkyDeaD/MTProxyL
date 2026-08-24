@@ -1046,10 +1046,17 @@ tui_zapret2_settings() {
             && _ipf="${ZAPRET2_FILTER_IP}"
         echo -e "  ${DIM}[14]${NC} Фильтр по IP  [${_ipf}]  ${DIM}— правила только для этого адреса${NC}"
         echo -e "  ${DIM}[15]${NC} Мимо очереди  [${ZAPRET2_EXCLUDE_IFACES:-нет}]  ${DIM}— интерфейсы VPN${NC}"
+        local _z_hook_note="авто"
+        case "${ZAPRET2_HOOK:-auto}" in
+            forward) _z_hook_note="forward (вручную)" ;;
+            host)    _z_hook_note="хост (вручную)" ;;
+            *) zapret2_is_bridge_target && _z_hook_note="авто → forward" || _z_hook_note="авто → хост" ;;
+        esac
+        echo -e "  ${DIM}[16]${NC} Цепочка NFT  [${_z_hook_note}]  ${DIM}— forward нужен, если цель в контейнере${NC}"
         local _z_bridge="false"
         if zapret2_is_bridge_target; then
             _z_bridge="true"
-            echo -e "  ${DIM}[11]${NC} Docker bridge: фильтр по IP контейнера [${DETECT_BRIDGE_STRATEGY:-simple}]"
+            echo -e "  ${DIM}[11]${NC} Фильтр по IP контейнера [${DETECT_BRIDGE_STRATEGY:-simple}]"
         fi
         echo ""
         echo -e "  ${DIM}[0]${NC} Назад"
@@ -1180,6 +1187,27 @@ tui_zapret2_settings() {
                        zapret2_update_config ;;
                 esac
                 press_any_key ;;
+            16)
+                echo ""
+                echo -e "  ${BOLD}Куда вешать правила очереди${NC}"
+                echo -e "  ${DIM}Прокси на самом хосте — правила идут в prerouting и postrouting.${NC}"
+                echo -e "  ${DIM}Прокси в контейнере — трафик до него проходит forward, и в${NC}"
+                echo -e "  ${DIM}цепочках хоста его нет. Свой контейнер мы определяем сами,${NC}"
+                echo -e "  ${DIM}чужой клиент прокси — нет, поэтому цепочку можно задать руками.${NC}"
+                echo ""
+                echo -e "  ${DIM}[1]${NC} Авто    — по результату определения ${DIM}(сейчас: $(zapret2_is_bridge_target && echo forward || echo хост))${NC}"
+                echo -e "  ${DIM}[2]${NC} Хост    — prerouting и postrouting"
+                echo -e "  ${DIM}[3]${NC} Forward — цель в контейнере"
+                local _zh; _zh=$(read_choice "выбор" "0")
+                case "$_zh" in
+                    1) ZAPRET2_HOOK="auto"; save_nft_settings
+                       log_success "Цепочка NFT: авто"; zapret2_update_config ;;
+                    2) ZAPRET2_HOOK="host"; save_nft_settings
+                       log_success "Цепочка NFT: хост (prerouting/postrouting)"; zapret2_update_config ;;
+                    3) ZAPRET2_HOOK="forward"; save_nft_settings
+                       log_success "Цепочка NFT: forward"; zapret2_update_config ;;
+                esac
+                press_any_key ;;
             12)
                 echo ""
                 echo -e "  ${DIM}nfqws2 сбрасывает привилегии под этого пользователя.${NC}"
@@ -1264,10 +1292,10 @@ tui_zapret2_settings() {
                 echo -e "  ${DIM}Трафик этих интерфейсов проходит мимо очереди.${NC}"
                 echo -e "  ${DIM}Туннели (AmneziaWG, WireGuard, OpenVPN) несут чужой HTTPS,${NC}"
                 echo -e "  ${DIM}и десинк по тому же порту ломает его вместе с нашим.${NC}"
-                echo -e "  ${DIM}Список через пробел, можно с «*». «std» — ${ZAPRET2_DEFAULT_EXCLUDE_IFACES}.${NC}"
+                local _present; _present=$(zapret2_tunnel_ifaces_present); _present="${_present% }"
+                echo -e "  ${DIM}Список через пробел, можно с «*».${NC}"
+                echo -e "  ${DIM}«auto» — найденные сейчас${_present:+ (${_present})}, «std» — маски ${ZAPRET2_DEFAULT_EXCLUDE_IFACES}.${NC}"
                 echo -e "  ${DIM}«off» — не исключать ничего.${NC}"
-                local _present; _present=$(zapret2_tunnel_ifaces_present)
-                [ -n "$_present" ] && echo -e "  ${DIM}Сейчас на сервере: ${_present% }${NC}"
                 echo -en "  Интерфейсы [${ZAPRET2_EXCLUDE_IFACES:-нет}]: "
                 local _ifs; read_line _ifs
                 case "${_ifs,,}" in
@@ -1276,6 +1304,14 @@ tui_zapret2_settings() {
                         ZAPRET2_EXCLUDE_IFACES=""; save_nft_settings
                         log_success "Ничего не исключаем"
                         zapret2_update_config ;;
+                    auto|авто)
+                        if [ -z "$_present" ]; then
+                            log_warn "Туннелей на сервере не видно — список не меняем"
+                        else
+                            ZAPRET2_EXCLUDE_IFACES="$_present"; save_nft_settings
+                            log_success "Мимо очереди: ${ZAPRET2_EXCLUDE_IFACES}"
+                            zapret2_update_config
+                        fi ;;
                     std)
                         ZAPRET2_EXCLUDE_IFACES="$ZAPRET2_DEFAULT_EXCLUDE_IFACES"; save_nft_settings
                         log_success "Мимо очереди: ${ZAPRET2_EXCLUDE_IFACES}"

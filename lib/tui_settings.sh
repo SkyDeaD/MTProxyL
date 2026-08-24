@@ -12,7 +12,7 @@ tui_settings_menu() {
         echo -e "  ${DIM}Правка: главное меню → Режим супер эксперта → Редактировать конфиг${NC}"
         echo ""
         echo -e "  ${DIM}Настройки хоста (NFT, Zapret2, selfmask, гео-блокировка, бэкапы)${NC}"
-        echo -e "  ${DIM}работают как обычно — они не про config.toml.${NC}"
+        echo -e "  ${DIM}работают как обычно — они не про конфиг движка.${NC}"
         press_any_key
         return
     fi
@@ -184,9 +184,15 @@ tui_settings_menu() {
                 save_settings; load_secrets; reload_proxy_config 2>/dev/null || true
                 press_any_key ;;
             8)
-                echo -e "  ${DIM}[1] Mask (перенаправлять)  [2] Drop (закрывать)${NC}"
+                echo -e "  ${DIM}[1] Mask (перенаправлять)      [2] Drop (закрывать)${NC}"
+                echo -e "  ${DIM}[3] Accept (пропускать как есть) [4] Reject handshake (TLS-отказ)${NC}"
                 local sc; sc=$(read_choice "выбор" "1")
-                case "$sc" in 2) UNKNOWN_SNI_ACTION="drop" ;; *) UNKNOWN_SNI_ACTION="mask" ;; esac
+                case "$sc" in
+                    2) UNKNOWN_SNI_ACTION="drop" ;;
+                    3) UNKNOWN_SNI_ACTION="accept" ;;
+                    4) UNKNOWN_SNI_ACTION="reject_handshake" ;;
+                    *) UNKNOWN_SNI_ACTION="mask" ;;
+                esac
                 save_settings; reload_proxy_config 2>/dev/null || true
                 log_success "SNI-политика: ${UNKNOWN_SNI_ACTION}"
                 press_any_key ;;

@@ -169,36 +169,87 @@ _telemt_api_enabled() {
     [ "$_en" != "false" ]
 }
 
+# [server.api] auth_header цели: ожидаемый движком Authorization заголовок
+# («Bearer TOKEN» или пусто). Пусто — авторизация на API выключена.
+_get_telemt_auth_header() {
+    local _cfg="${1:-$DETECTED_CONFIG_PATH}"
+    [ -n "$_cfg" ] && [ -f "$_cfg" ] || return 0
+    _toml_get_string_in_section "server.api" "auth_header" "$_cfg"
+}
+
 # Адрес, по которому API цели виден с хоста. У контейнера в bridge-сети своя
 # петля: 127.0.0.1 внутри него — это он сам, а не мы, и достучаться туда с
 # хоста нельзя ни при каких портах. Зато его адрес в сети docker доступен —
 # если движок слушает не только петлю. Публикация порта (-p) тоже подходит и
 # ловится обычной проверкой 127.0.0.1, поэтому её пробуем первой.
+# Адрес в сети docker берём не первый попавшийся, а тот, который ответил:
+# из нескольких сетей контейнера с хоста доступна не каждая.
 _telemt_api_host() {
     [ "${DETECTED_NETWORK_MODE:-host}" = "bridge" ] || { echo "127.0.0.1"; return 0; }
-    local _port; _port=$(_get_telemt_api_port "${1:-$DETECTED_CONFIG_PATH}")
-    if curl -s -o /dev/null --max-time 1 --connect-timeout 1 "http://127.0.0.1:${_port}/v1/health" 2>/dev/null; then
+    local _cfg="${1:-$DETECTED_CONFIG_PATH}"
+    local _port; _port=$(_get_telemt_api_port "$_cfg")
+    local _auth; _auth=$(_get_telemt_auth_header "$_cfg")
+    local -a _auth_h=()
+    [ -n "$_auth" ] && _auth_h=(-H "Authorization: ${_auth}")
+    # Ответ 401 тоже считается «достучались»: проба про доступность хоста,
+    # а не про права. Заголовок всё же шлём — не порождаем лишних отказов.
+    if curl -s -o /dev/null --max-time 1 --connect-timeout 1 "${_auth_h[@]}" \
+        "http://127.0.0.1:${_port}/v1/health" 2>/dev/null; then
         echo "127.0.0.1"
         return 0
     fi
-    local _cip; _cip=$(docker_container_ip 2>/dev/null)
-    if [ -n "$_cip" ]; then
-        echo "$_cip"
-        return 0
-    fi
+    local _ip
+    while IFS= read -r _ip; do
+        [ -n "$_ip" ] || continue
+        if curl -s -o /dev/null --max-time 1 --connect-timeout 1 "${_auth_h[@]}" \
+            "http://${_ip}:${_port}/v1/health" 2>/dev/null; then
+            echo "$_ip"
+            return 0
+        fi
+    done < <(_target_container_ips 2>/dev/null)
     echo "127.0.0.1"
 }
 
+# HTTP-код, которым цель отвечает на /v1/users. 000 — не ответила вовсе.
+# Спрашиваем отдельно, а не запоминаем в переменной при обычном запросе:
+# _get_telemt_users_json зовут из $( ), а это субшелл — присвоенное там
+# до вызывающего не доходит.
+_telemt_api_probe_code() {
+    local _cfg="${1:-$DETECTED_CONFIG_PATH}"
+    local _port _host _auth
+    _port=$(_get_telemt_api_port "$_cfg")
+    _host=$(_telemt_api_host "$_cfg")
+    _auth=$(_get_telemt_auth_header "$_cfg")
+    local -a _auth_h=()
+    [ -n "$_auth" ] && _auth_h=(-H "Authorization: ${_auth}")
+    curl -s -o /dev/null -w '%{http_code}' --max-time 3 --connect-timeout 2 \
+        "${_auth_h[@]}" "http://${_host}:${_port}/v1/users" 2>/dev/null || echo "000"
+}
+
 # JSON с /v1/users API цели.
-# Коды: 0 — успех, 2 — API выключен в конфиге, 3 — включён, но не отвечает.
+# Коды: 0 — успех, 2 — API выключен в конфиге, 3 — включён, но не отвечает,
+# 4 — отвечает, но отклонил авторизацию ([server.api] auth_header).
 _get_telemt_users_json() {
     local _cfg="${1:-$DETECTED_CONFIG_PATH}"
     _telemt_api_enabled "$_cfg" || return 2
     local _port; _port=$(_get_telemt_api_port "$_cfg")
     local _host; _host=$(_telemt_api_host "$_cfg")
-    local _json
-    _json=$(curl -s --max-time 3 --connect-timeout 2 "http://${_host}:${_port}/v1/users" 2>/dev/null) || return 3
-    [ -z "$_json" ] && return 3
+    local _auth; _auth=$(_get_telemt_auth_header "$_cfg")
+    local -a _auth_h=()
+    [ -n "$_auth" ] && _auth_h=(-H "Authorization: ${_auth}")
+    # Код ответа дописываем последней строкой через -w и отделяем его тут же:
+    # тело дальше парсится построчно, лишний хвост ему не нужен.
+    local _resp _code _json
+    _resp=$(curl -s --max-time 3 --connect-timeout 2 "${_auth_h[@]}" \
+                -w $'\n%{http_code}' "http://${_host}:${_port}/v1/users" 2>/dev/null) || return 3
+    [ -z "$_resp" ] && return 3
+    _code="${_resp##*$'\n'}"
+    case "$_code" in
+        200) ;;
+        401|403) return 4 ;;
+        *)       return 3 ;;
+    esac
+    _json="${_resp%$'\n'*}"
     grep -qE '"ok"[[:space:]]*:[[:space:]]*false' <<< "$_json" && return 3
     grep -q '"data"' <<< "$_json" || return 3
     echo "$_json"
@@ -216,6 +267,12 @@ _telemt_api_unavailable_reason() {
         echo "[server.api] enabled = false в конфиге цели"
         return
     fi
+    local _code; _code=$(_telemt_api_probe_code "$_cfg")
+    case "$_code" in
+        401|403)
+            echo "цель требует авторизацию (${_code}) — сверьте [server.api] auth_header в конфиге цели"
+            return ;;
+    esac
     local _port; _port=$(_get_telemt_api_port "$_cfg")
     if [ "${DETECTED_NETWORK_MODE:-host}" = "bridge" ]; then
         local _listen; _listen=$(_toml_get_string_in_section "server.api" "listen" "$_cfg")
@@ -224,7 +281,14 @@ _telemt_api_unavailable_reason() {
                 echo "цель в Docker bridge, а API слушает петлю контейнера ${_listen} — снаружи она недоступна"
                 return ;;
         esac
-        echo "API не отвечает на $(_telemt_api_host "$_cfg"):${_port} (цель в Docker bridge)"
+        # Без _telemt_api_host: его пробы уже провалились выше, повторять их
+        # ради текста ошибки — ещё секунды ожидания на пустом месте.
+        local _ips; _ips=$(_target_container_ips 2>/dev/null | paste -sd ',' - | sed 's/,/, /g')
+        if [ -n "$_ips" ]; then
+            echo "API не отвечает на порту ${_port} ни на петле, ни по адресам контейнера: ${_ips} (цель в Docker bridge)"
+        else
+            echo "API не отвечает на 127.0.0.1:${_port} (цель в Docker bridge, адрес контейнера не определён)"
+        fi
         return
     fi
     echo "API не отвечает на 127.0.0.1:${_port}"
@@ -236,7 +300,7 @@ _telemt_api_bridge_hint() {
     [ "${DETECTED_NETWORK_MODE:-host}" = "bridge" ] || return 0
     local _cfg="${1:-$DETECTED_CONFIG_PATH}"
     local _port; _port=$(_get_telemt_api_port "$_cfg")
-    local _cip; _cip=$(docker_container_ip 2>/dev/null)
+    local _cips; _cips=$(_target_container_ips 2>/dev/null | paste -sd ',' - | sed 's/,/, /g')
     echo ""
     echo -e "  ${BOLD}Цель работает в Docker bridge.${NC}"
     echo -e "  ${DIM}127.0.0.1 внутри контейнера — сам контейнер, а не хост,${NC}"
@@ -251,8 +315,9 @@ _telemt_api_bridge_hint() {
     echo -e "  ${DIM}сети docker, и со списком по умолчанию (только 127.0.0.0/8)${NC}"
     echo -e "  ${DIM}движок отклонит наши запросы уже после подключения.${NC}"
     echo ""
-    if [ -n "$_cip" ]; then
-        echo -e "  ${DIM}После перезапуска цели MTProxyL сам пойдёт на ${_cip}:${_port}.${NC}"
+    if [ -n "$_cips" ]; then
+        echo -e "  ${DIM}После перезапуска цели MTProxyL сам пойдёт на тот из адресов${NC}"
+        echo -e "  ${DIM}контейнера (${_cips}), который ответит на порту ${_port}.${NC}"
     fi
     echo -e "  ${DIM}Наружу это не открывает: порт контейнера доступен только${NC}"
     echo -e "  ${DIM}хосту, пока он не опубликован через -p.${NC}"
@@ -423,7 +488,7 @@ _engine_config_path() {
     if [ "${MTPROXYL_MODE:-manager}" = "reanimator" ]; then
         printf '%s' "${DETECTED_CONFIG_PATH:-}"
     else
-        printf '%s' "${CONFIG_DIR}/config.toml"
+        printf '%s' "$(engine_config_path)"
     fi
 }
 
@@ -752,23 +817,23 @@ detect_telemt() {
             [ "$_is_telemt" = "false" ] && continue
             DETECTED_MODE="docker"
             DETECTED_CONTAINER="$_cname"
-            local _mount _candidate _dest
-            local _dests="/etc/telemt.toml /etc/telemt /etc/telemt/telemt.toml /app/config.toml"
-            for _dest in $_dests; do
-                _mount=$(docker inspect -f "{{range .Mounts}}{{if eq .Destination \"${_dest}\"}}{{.Source}}{{end}}{{end}}" "$_cname" 2>/dev/null)
-                [ -z "$_mount" ] && continue
-                if [ -d "$_mount" ]; then
-                    for _candidate in "${_mount}/config.toml" "${_mount}/telemt.toml"; do
+            # Перебираем все точки монтирования, а не заранее известный список
+            # путей внутри контейнера: конфиг могли подключить куда угодно.
+            local _source _candidate
+            while IFS= read -r _source; do
+                [ -n "$_source" ] || continue
+                if [ -d "$_source" ]; then
+                    for _candidate in "${_source}/config.toml" "${_source}/telemt.toml"; do
                         if [ -f "$_candidate" ] && ! _is_excluded_path "$_candidate" && _looks_like_telemt_config "$_candidate"; then
                             DETECTED_CONFIG_PATH="$_candidate"
                             break 2
                         fi
                     done
-                elif [ -f "$_mount" ] && ! _is_excluded_path "$_mount" && _looks_like_telemt_config "$_mount"; then
-                    DETECTED_CONFIG_PATH="$_mount"
+                elif [ -f "$_source" ] && ! _is_excluded_path "$_source" && _looks_like_telemt_config "$_source"; then
+                    DETECTED_CONFIG_PATH="$_source"
                     break
                 fi
-            done
+            done < <(docker inspect -f '{{range .Mounts}}{{.Source}}{{"\n"}}{{end}}' "$_cname" 2>/dev/null)
             local _nm
             _nm=$(docker inspect -f '{{.HostConfig.NetworkMode}}' "$_cname" 2>/dev/null)
             if [ "$_nm" = "host" ]; then
@@ -838,11 +903,23 @@ detect_telemt() {
     return 1
 }
 
-docker_container_ip() {
+# Сетей у контейнера бывает несколько, и не каждая доступна с хоста: overlay
+# и macvlan (dokploy-network и подобные), пересечение подсети с LAN. Отдаём
+# все адреса, выбор оставляем вызывающему. IPv6-only сети отсеиваются сами:
+# поле IPAddress у них пустое.
+_target_container_ips() {
     local _container="${1:-$DETECTED_CONTAINER}"
     [ -z "$_container" ] && return 1
+    # Пустой IPAddress свежий docker печатает в шаблоне как «invalid IP»:
+    # у сети host и у неназначенных endpoint'ов. Отсеиваем по форме адреса,
+    # иначе эта строка уходила бы в curl и в правила nft.
     docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{"\n"}}{{end}}' \
-        "$_container" 2>/dev/null | awk 'NF {print; exit}'
+        "$_container" 2>/dev/null | awk '/^([0-9]{1,3}\.){3}[0-9]{1,3}$/'
+}
+
+# Первый адрес — для мест, где перебирать нечем и не по чему проверять.
+docker_container_ip() {
+    _target_container_ips "${1:-$DETECTED_CONTAINER}" | sed -n '1p'
 }
 
 prompt_bridge_mode() {
@@ -1236,7 +1313,7 @@ offer_reapply_fixes() {
 # либо сгенерированный конфиг)
 _own_install_exists() {
     [ "$(own_container_state 2>/dev/null)" != "absent" ] && return 0
-    [ -f "${CONFIG_DIR}/config.toml" ]
+    [ -f "$(engine_config_path)" ]
 }
 
 switch_to_manager_mode() {
@@ -1293,6 +1370,20 @@ switch_to_manager_mode() {
 # Аргументом, а не вопросом: панель спрашивает пользователя сама.
 _dispose_own_container() {
     local _choice="$1"
+    if engine_is_binary; then
+        case "$_choice" in
+            remove) binengine_remove_service ;;
+            stop)
+                systemctl stop "$ENGINE_SERVICE" &>/dev/null \
+                    && log_success "Движок остановлен (служба оставлена)" \
+                    || log_warn "Не удалось остановить ${ENGINE_SERVICE}" ;;
+            keep)
+                log_info "Движок оставлен как есть"
+                log_warn "Он продолжит занимать порт ${PROXY_PORT:-443} — цель реаниматора может не запуститься" ;;
+            *) log_error "Неизвестное решение по движку: ${_choice}"; return 1 ;;
+        esac
+        return
+    fi
     case "$_choice" in
         remove)
             remove_own_container ;;
@@ -1338,12 +1429,16 @@ switch_to_reanimator_mode() {
     local _own_state; _own_state=$(own_container_state 2>/dev/null)
     if [ "$_own_state" != "absent" ]; then
         echo ""
-        echo -e "  ${BOLD}Свой контейнер ${CONTAINER_NAME}:${NC} ${_own_state}"
+        if engine_is_binary; then
+            echo -e "  ${BOLD}Свой движок ${ENGINE_SERVICE}:${NC} ${_own_state}"
+        else
+            echo -e "  ${BOLD}Свой контейнер ${CONTAINER_NAME}:${NC} ${_own_state}"
+        fi
         echo -e "  ${DIM}Он занимает порт ${PROXY_PORT:-443} и будет мешать цели реаниматора.${NC}"
         if [ -z "$_container_choice" ]; then
             echo ""
-            echo -e "  ${DIM}[1]${NC} Остановить и удалить контейнер ${DIM}(рекомендуется)${NC}"
-            echo -e "  ${DIM}[2]${NC} Только остановить, контейнер оставить"
+            echo -e "  ${DIM}[1]${NC} Остановить и снять службу/контейнер ${DIM}(рекомендуется)${NC}"
+            echo -e "  ${DIM}[2]${NC} Только остановить, не снимать"
             echo -e "  ${DIM}[3]${NC} Не трогать"
             local _oc; _oc=$(read_choice "выбор" "1")
             case "$_oc" in

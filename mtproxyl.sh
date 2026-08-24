@@ -20,7 +20,7 @@ export LC_NUMERIC=C
 export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a
 
-VERSION="1.5.0"
+VERSION="1.5.9"
 SCRIPT_NAME="mtproxyl"
 INSTALL_DIR="/opt/mtproxyl"
 CONFIG_DIR="${INSTALL_DIR}/mtproxy"
@@ -81,7 +81,7 @@ fi
 
 # Загрузка библиотек
 LIB_DIR="${INSTALL_DIR}/lib"
-for _lib in colors utils settings detect secrets config docker engine traffic availability dc warp geoblock geoip upstream backup nft selfmask panel tgbot alertbot tui_main tui_proxy tui_secrets tui_links tui_settings tui_security tui_traffic tui_engine tui_backup tui_expert tui_nft tui_selfmask tui_addons tui_tgbot tui_alertbot tui_warp tui_detect expert_catalog expert_mode settings_cli install; do
+for _lib in colors utils settings detect secrets config docker binengine engine traffic stats availability dc warp geoblock geoip upstream backup nft ipblock selfmask panel tgbot alertbot tui_main tui_proxy tui_secrets tui_links tui_settings tui_security tui_traffic tui_engine tui_backup tui_expert tui_nft tui_ipblock tui_selfmask tui_addons tui_tgbot tui_alertbot tui_warp tui_detect expert_catalog expert_mode settings_cli install install_args migrate argsgen; do
     if [ -f "${LIB_DIR}/${_lib}.sh" ]; then
         # shellcheck source=/dev/null
         source "${LIB_DIR}/${_lib}.sh"
@@ -94,17 +94,30 @@ done
 
 # Temp file tracking
 declare -a _TEMP_FILES=()
+# _mktemp всегда зовут через $( ), а это субшелл: его запись в _TEMP_FILES
+# до нас не доходит. Поэтому в имени файла лежит PID, и подчищаем по нему —
+# чужие процессы и параллельные запуски не затрагиваются.
 _cleanup() {
+    local f
     for f in "${_TEMP_FILES[@]}"; do
         rm -f "$f" 2>/dev/null
     done
+    [ "${BASHPID:-$$}" = "$$" ] || return 0
+    for f in "${TMPDIR:-/tmp}" "$INSTALL_DIR" "$CONFIG_DIR"; do
+        [ -n "$f" ] || continue
+        rm -f "${f}/.mtproxyl.$$."* 2>/dev/null
+    done
+    # Хвосты прошлых версий: имя без PID никто больше не создаёт, а часа
+    # хватает любому запуску. Оборванные наши — по общему правилу, за сутки.
+    find "${TMPDIR:-/tmp}" -maxdepth 1 -name '.mtproxyl.??????' -type f -mmin +60 -delete 2>/dev/null
+    find "${TMPDIR:-/tmp}" -maxdepth 1 -name '.mtproxyl.*' -type f -mmin +1440 -delete 2>/dev/null
 }
 trap _cleanup EXIT
 
 _mktemp() {
     local dir="${1:-${TMPDIR:-/tmp}}"
     local tmp
-    tmp=$(mktemp "${dir}/.mtproxyl.XXXXXX") || return 1
+    tmp=$(mktemp "${dir}/.mtproxyl.$$.XXXXXX") || return 1
     chmod 600 "$tmp"
     _TEMP_FILES+=("$tmp")
     echo "$tmp"
@@ -210,6 +223,11 @@ cli_main() {
             show_connections
             ;;
 
+        stats)
+            load_settings; load_secrets; load_detect_settings
+            handle_stats_command "$@"
+            ;;
+
         config)
             load_settings; load_detect_settings
             show_config
@@ -245,7 +263,7 @@ cli_main() {
                 --json)
                     # API движка живёт в конфиге активного режима. Панель настроена на
                     # один адрес и после смены режима опрашивала бы чужой движок.
-                    _mode_cfg="${CONFIG_DIR}/config.toml"
+                    _mode_cfg=$(engine_config_path)
                     [ "${MTPROXYL_MODE:-manager}" = "reanimator" ] && _mode_cfg="${DETECTED_CONFIG_PATH:-}"
                     _api_port=$(_get_telemt_api_port "$_mode_cfg" 2>/dev/null || echo "")
                     _api_on="false"
@@ -257,7 +275,11 @@ cli_main() {
 
                     # Откуда брать логи движка текущего режима: свой контейнер, контейнер
                     # цели или systemd-юнит. Панель зовёт то, что настроено при установке.
-                    _log_kind="docker"; _log_target="$CONTAINER_NAME"
+                    if engine_is_binary; then
+                        _log_kind="service"; _log_target="$ENGINE_SERVICE"
+                    else
+                        _log_kind="docker"; _log_target="$CONTAINER_NAME"
+                    fi
                     if [ "${MTPROXYL_MODE:-manager}" = "reanimator" ]; then
                         case "${DETECTED_MODE:-unknown}" in
                             docker|mtproxymax)
@@ -274,8 +296,9 @@ cli_main() {
                     # конфига цели, а не наш PROXY_DOMAIN.
                     _mode_sni=$(_current_sni_domain 2>/dev/null || echo "")
 
-                    printf '{"mode":"%s","tools_only":%s,"detected_mode":"%s","detected_config":"%s","port":%d,"sni":"%s","engine_config":"%s","api_port":%d,"api_enabled":%s,"own_container":"%s","running":%s,"log_kind":"%s","log_target":"%s"}\n' \
+                    printf '{"mode":"%s","engine":"%s","tools_only":%s,"detected_mode":"%s","detected_config":"%s","port":%d,"sni":"%s","engine_config":"%s","api_port":%d,"api_enabled":%s,"own_container":"%s","running":%s,"log_kind":"%s","log_target":"%s"}\n' \
                         "$(json_escape "${MTPROXYL_MODE:-manager}")" \
+                        "$(json_escape "$(engine_backend)")" \
                         "$([ "${TOOLS_ONLY:-false}" = "true" ] && echo true || echo false)" \
                         "$(json_escape "${DETECTED_MODE:-unknown}")" \
                         "$(json_escape "${DETECTED_CONFIG_PATH:-}")" \
@@ -333,6 +356,11 @@ cli_main() {
         geoblock)
             load_settings
             handle_geoblock_command "$@"
+            ;;
+
+        block)
+            load_settings
+            handle_block_command "$@"
             ;;
 
         geoip)
@@ -526,7 +554,7 @@ cli_main() {
                     else
                         echo -e "  ${BOLD}Снимки:${NC} выключены ${DIM}(mtproxyl ip-history on)${NC}"
                     fi
-                    echo -e "  ${BOLD}Записей:${NC} $(grep -c '^USER|' "$_db" 2>/dev/null || echo 0)"
+                    echo -e "  ${BOLD}Записей:${NC} $(count_lines '^USER|' "$_db")"
                     echo -e "  ${BOLD}Хранить:${NC} $(_user_ip_history_cap) адресов на пользователя"
                     ;;
                 *)
@@ -556,8 +584,24 @@ cli_main() {
             handle_panel_command "$@"
             ;;
 
+        swap)
+            handle_swap_command "$@"
+            ;;
+
+        migrate)
+            # Переезд копирует свою же установку — нужны и настройки, и секреты.
+            check_root; load_settings; load_secrets; load_detect_settings
+            handle_migrate_command "$@"
+            ;;
+
         install)
-            run_installer
+            # Без аргументов — прежний мастер; с аргументами ставим молча.
+            if [ $# -gt 0 ]; then
+                load_settings 2>/dev/null || true
+                run_installer_args "$@"
+            else
+                run_installer
+            fi
             ;;
 
         menu)

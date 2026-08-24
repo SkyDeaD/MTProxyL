@@ -182,7 +182,7 @@ _superexpert_users() {
 superexpert_show_rules() {
     echo -e "  ${BOLD}Как это работает:${NC}"
     echo -e "  ${DIM}• Конфиг движка — ваш файл ${SUPEREXPERT_FILE}${NC}"
-    echo -e "  ${DIM}• Перед каждым запуском он копируется на место config.toml${NC}"
+    echo -e "  ${DIM}• Перед каждым запуском он копируется на место $(basename "$(engine_config_path)")${NC}"
     echo -e "  ${DIM}• MTProxyL ничего в него не дописывает: ни секреты, ни настройки,${NC}"
     echo -e "  ${DIM}  ни expert-override, ни tune${NC}"
     echo -e "  ${DIM}• Меню «Управление секретами», «Настройки», «Режим эксперта» и${NC}"
@@ -219,12 +219,12 @@ superexpert_enable() {
 
     if [ ! -f "$SUPEREXPERT_FILE" ]; then
         # Копию делаем с действующего конфига; если его ещё нет — генерируем
-        if [ ! -f "${CONFIG_DIR}/config.toml" ]; then
+        if [ ! -f "$(engine_config_path)" ]; then
             log_info "Рабочего конфига пока нет — генерируем его из текущих настроек"
             generate_telemt_config || { log_error "Не удалось сгенерировать конфиг"; return 1; }
         fi
         mkdir -p "$INSTALL_DIR"
-        cp "${CONFIG_DIR}/config.toml" "$SUPEREXPERT_FILE" || {
+        cp "$(engine_config_path)" "$SUPEREXPERT_FILE" || {
             log_error "Не удалось создать ${SUPEREXPERT_FILE}"; return 1; }
         chmod 600 "$SUPEREXPERT_FILE"
         log_success "Создан ваш конфиг: ${SUPEREXPERT_FILE}"
@@ -347,7 +347,7 @@ superexpert_recreate() {
     SUPEREXPERT_ENABLED="$_saved"
 
     [ -f "$SUPEREXPERT_FILE" ] && cp "$SUPEREXPERT_FILE" "${SUPEREXPERT_FILE}.bak" 2>/dev/null
-    cp "${CONFIG_DIR}/config.toml" "$SUPEREXPERT_FILE" || { log_error "Не удалось записать ${SUPEREXPERT_FILE}"; return 1; }
+    cp "$(engine_config_path)" "$SUPEREXPERT_FILE" || { log_error "Не удалось записать ${SUPEREXPERT_FILE}"; return 1; }
     chmod 600 "$SUPEREXPERT_FILE"
     log_success "Файл пересоздан: ${SUPEREXPERT_FILE}"
 
@@ -387,13 +387,21 @@ handle_superexpert_command() {
 generate_telemt_config() {
     mkdir -p "$CONFIG_DIR"; chmod 700 "$CONFIG_DIR"
 
+    # Маршруты собираются из массивов в памяти. Команда, которая не звала
+    # load_upstreams (установка аргументами, sni-policy, selfmask), молча
+    # вычистила бы из конфига все upstream'ы: после загрузки их всегда хотя бы
+    # один — подразумеваемый direct.
+    if [ "${#UPSTREAM_NAMES[@]}" -eq 0 ]; then
+        load_upstreams 2>/dev/null || true
+    fi
+
     # Режим супер эксперта: конфиг ведёт пользователь, мы только кладём его
     # файл на место config.toml. Ни настройки, ни секреты, ни override не
     # применяются — это и есть смысл режима.
     if _superexpert_active; then
-        cp "$SUPEREXPERT_FILE" "${CONFIG_DIR}/config.toml" || {
+        cp "$SUPEREXPERT_FILE" "$(engine_config_path)" || {
             log_error "Не удалось применить ${SUPEREXPERT_FILE}"; return 1; }
-        chmod 644 "${CONFIG_DIR}/config.toml"
+        chmod 644 "$(engine_config_path)"
         log_info "Режим супер эксперта: конфиг взят из ${SUPEREXPERT_FILE}"
         _superexpert_sync_port
         return 0
@@ -629,35 +637,43 @@ TOML_EOF
     _apply_expert_overrides "$tmp"
 
     chmod 644 "$tmp"
-    cp "$tmp" "${CONFIG_DIR}/config.toml" && rm -f "$tmp"
+    cp "$tmp" "$(engine_config_path)" && rm -f "$tmp"
 }
 
 # Override попадает в конфиг только при его генерации, поэтому предлагаем
 # пересборку сразу — иначе «сохранено» вводит в заблуждение.
 # Панель сохраняет пачкой: там пересборка отдельным шагом.
-expert_apply_now() {
+# Общий хвост для expert_apply_now и _expert_apply_prompt: генерация конфига
+# и решение, хватит ли SIGHUP. tls_domains, exclusive_mask и вообще всё
+# помеченное в каталоге как hot=✘ (или заданное через --raw мимо каталога)
+# на лету не подхватывается — движок читает такие параметры только при
+# полном старте, поэтому здесь честно говорим о restart, а не рапортуем
+# успех, которого не было.
+_expert_generate_and_apply() {
     generate_telemt_config || { log_error "Ошибка генерации конфига"; return 1; }
     log_success "Конфиг обновлён"
-    if is_proxy_running; then
-        reload_target_config &>/dev/null || true
-        log_success "Hot-reload отправлен"
-    else
+    if ! is_proxy_running; then
         log_warn "Прокси не запущен — значения применятся при запуске"
+        return 0
     fi
+    reload_target_config &>/dev/null || true
+    if _expert_needs_restart; then
+        log_warn "Среди заданных параметров есть без hot-reload — на лету не применились"
+        log_info "Чтобы вступили в силу: mtproxyl restart"
+    else
+        log_success "Hot-reload отправлен"
+    fi
+}
+
+expert_apply_now() {
+    _expert_generate_and_apply
 }
 
 _expert_apply_prompt() {
     echo -en "  ${BOLD}Пересобрать конфиг и применить сейчас? [Y/n]:${NC} "
     local _yn; read_line _yn
     [[ "$_yn" =~ ^[nN] ]] && { log_info "Позже: mtproxyl config или меню → Режим эксперта → Пересобрать"; return 0; }
-    generate_telemt_config || { log_error "Ошибка генерации конфига"; return 1; }
-    log_success "Конфиг обновлён"
-    if is_proxy_running; then
-        reload_target_config &>/dev/null || true
-        log_success "Hot-reload отправлен"
-    else
-        log_warn "Прокси не запущен — значения применятся при запуске"
-    fi
+    _expert_generate_and_apply
 }
 
 handle_expert_command() {
@@ -673,27 +689,43 @@ handle_expert_command() {
             esac ;;
         set)
             check_root
-            local _sec="${1:-}" _key="${2:-}" _val="${3:-}"
+            local _raw="false" _apply="true"
+            local -a _pos=()
+            local _a
+            for _a in "$@"; do
+                case "$_a" in
+                    --raw)      _raw="true" ;;
+                    --no-apply) _apply="false" ;;
+                    *)          _pos+=("$_a") ;;
+                esac
+            done
+            local _sec="${_pos[0]:-}" _key="${_pos[1]:-}" _val="${_pos[2]:-}"
             if [ -z "$_sec" ] || [ -z "$_key" ] || [ -z "$_val" ]; then
-                log_error "Использование: mtproxyl expert set <секция> <ключ> <значение>"
+                log_error "Использование: mtproxyl expert set [--raw] <секция> <ключ> <значение>"
                 return 1
             fi
             local _entry; _entry=$(_expert_find "$_sec" "$_key")
             if [ -z "$_entry" ]; then
-                log_error "Параметр [${_sec}] ${_key} не найден в каталоге"
-                log_info "Список доступных: меню → Режим эксперта"
-                return 1
-            fi
-            _expert_parse "$_entry"
-            local _verr
-            _verr=$(_expert_validate "$EXPERT_P_VALIDATOR" "$_val" 2>&1)
-            if [ -n "$_verr" ]; then
-                log_error "Некорректное значение: ${_verr}"
-                return 1
+                if [ "$_raw" != "true" ]; then
+                    log_error "Параметр [${_sec}] ${_key} не найден в каталоге"
+                    log_info "Список доступных: меню → Режим эксперта"
+                    log_info "Записать всё равно: mtproxyl expert set --raw ${_sec} ${_key} <значение>"
+                    return 1
+                fi
+                _expert_validate_raw "$_sec" "$_key" "$_val" || return 1
+            else
+                _expert_parse "$_entry"
+                local _verr
+                _verr=$(_expert_validate "$EXPERT_P_VALIDATOR" "$_val" 2>&1)
+                if [ -n "$_verr" ]; then
+                    log_error "Некорректное значение: ${_verr}"
+                    return 1
+                fi
             fi
             save_expert_override "$_sec" "$_key" "$_val" || return 1
             log_success "Override сохранён: [${_sec}] ${_key} = ${_val}"
-            [ "${4:-}" = "--no-apply" ] && return 0
+            [ -z "$_entry" ] && log_warn "Параметра нет в каталоге — значение не проверялось"
+            [ "$_apply" = "true" ] || return 0
             _expert_apply_prompt ;;
         clear)
             check_root
@@ -726,7 +758,7 @@ handle_expert_command() {
             expert_apply_now ;;
         edit)
             check_root
-            local config="${CONFIG_DIR}/config.toml"
+            local config; config=$(engine_config_path)
             if [ -f "$config" ]; then
                 local editor="${EDITOR:-nano}"
                 log_warn "Изменения будут перезаписаны при генерации конфига!"
@@ -739,6 +771,7 @@ handle_expert_command() {
             echo -e "    ${GREEN}expert list --json${NC}                     Заданные override (JSON)"
             echo -e "    ${GREEN}expert list --catalog${NC}                  Весь каталог с валидаторами (JSON)"
             echo -e "    ${GREEN}expert set${NC} <секция> <ключ> <значение>   Добавить"
+            echo -e "    ${GREEN}expert set --raw${NC} <секция> <ключ> <знач>  Параметр вне каталога, без проверки"
             echo -e "    ${GREEN}expert clear${NC} <секция> <ключ> | all      Удалить"
             echo -e "    ${GREEN}expert apply${NC}                           Пересобрать конфиг и применить"
             echo -e "    ${DIM}У set/clear есть --no-apply: отложить применение${NC}"
@@ -769,7 +802,7 @@ superexpert_show_file() {
         cat "$SUPEREXPERT_FILE"
         return 0
     fi
-    local _live="${CONFIG_DIR}/config.toml"
+    local _live; _live=$(engine_config_path)
     if [ -f "$_live" ]; then
         cat "$_live"
         return 0

@@ -85,8 +85,12 @@ export type MtproxylMode = 'manager' | 'reanimator';
 
 export interface MtproxylModeStatus {
   mode: MtproxylMode;
+  /** Чем менеджер держит движок: docker (контейнер) или binary (служба). */
+  engine?: string;
   detected_mode: string;
   detected_config: string;
+  /** Конфиг движка текущего режима. */
+  engine_config?: string;
   port: number;
   /** Состояние своего контейнера MTProxyL: running, exited, absent и т.п. */
   own_container?: string;
@@ -164,6 +168,23 @@ export interface MtproxylAvailability {
   operation: MtproxylOperation;
 }
 
+export interface IpBlockStatus {
+  enabled: boolean;
+  action: string;
+  rules_active: boolean;
+  count: number;
+  hits_total: number;
+  entries: string[];
+}
+
+export interface IpBlockHit {
+  entry: string;
+  packets: number;
+  bytes: number;
+  first: string;
+  last: string;
+}
+
 const MTPROXYL_BASE = `${BASE}/api/mtproxyl`;
 
 /** Ответ `mtproxyl update --check`: что стоит и что опубликовано. */
@@ -179,6 +200,32 @@ export interface MtproxylUpdateInfo {
   checked_at?: string;
 }
 
+/** Ответ `mtproxyl engine versions`: чем движок носится и что доступно. */
+export interface MtproxylEngineRelease {
+  tag: string;
+  name: string;
+  date: string;
+}
+
+export interface MtproxylEngineVersions {
+  /** docker или binary. */
+  backend: string;
+  current: string;
+  binary: boolean;
+  /** Версии на диске — к ним откатываются без сети. */
+  local: string[];
+  releases: MtproxylEngineRelease[];
+}
+
+/** Ответ `mtproxyl stats --json`: что накоплено на диске. */
+export interface MtproxylStats {
+  mode: string;
+  traffic: { users: number; orphans: number; in_bytes: number; out_bytes: number };
+  ips: { records: number; orphans: number };
+}
+
+export type MtproxylStatsScope = 'all' | 'traffic' | 'ips' | 'orphans' | 'user';
+
 export const mtproxylApi = {
   status: () => request<MtproxylAvailability>(MTPROXYL_BASE, '/status'),
 
@@ -188,6 +235,27 @@ export const mtproxylApi = {
     request<MtproxylUpdateInfo>(MTPROXYL_BASE, `/update${refresh ? '?refresh=1' : ''}`),
   applyUpdate: () =>
     request<MtproxylOperation>(MTPROXYL_BASE, '/update/apply', { method: 'POST' }),
+
+  engineVersions: () =>
+    request<MtproxylEngineVersions>(MTPROXYL_BASE, '/engine/versions'),
+  engineUpdate: (tag: string) =>
+    request<MtproxylOperation>(MTPROXYL_BASE, '/engine/update', {
+      method: 'POST',
+      body: JSON.stringify({ tag }),
+    }),
+  // Пустой tag — «на предыдущую»: у бинарного движка другой формы нет.
+  engineRollback: (tag = '') =>
+    request<MtproxylOperation>(MTPROXYL_BASE, '/engine/rollback', {
+      method: 'POST',
+      body: JSON.stringify({ tag }),
+    }),
+
+  stats: () => request<MtproxylStats>(MTPROXYL_BASE, '/stats'),
+  statsReset: (scope: MtproxylStatsScope, label = '') =>
+    request<{ output: string }>(MTPROXYL_BASE, '/stats/reset', {
+      method: 'POST',
+      body: JSON.stringify({ scope, label }),
+    }),
 
   // Слот операции общий и переживает перезагрузку страницы, поэтому закрытие
   // окна с логом приходится подтверждать на сервере — иначе тот же лог
@@ -432,6 +500,29 @@ export const mtproxylNetApi = {
       method: 'POST',
       body: JSON.stringify({ preset }),
     }),
+
+  ipblock: () => request<IpBlockStatus>(MTPROXYL_BASE, '/ipblock'),
+  ipblockHits: () => request<{ hits: IpBlockHit[] }>(MTPROXYL_BASE, '/ipblock/hits'),
+  ipblockAdd: (entry: string, comment: string) =>
+    request<{ output: string }>(MTPROXYL_BASE, '/ipblock', {
+      method: 'POST',
+      body: JSON.stringify({ entry, comment }),
+    }),
+  ipblockRemove: (entry: string) =>
+    request<{ output: string }>(MTPROXYL_BASE, `/ipblock/${encodeURIComponent(entry)}`, {
+      method: 'DELETE',
+    }),
+  ipblockState: (body: { enabled?: boolean; action?: string }) =>
+    request<{ output: string }>(MTPROXYL_BASE, '/ipblock/state', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  ipblockImport: (body: string, mode: 'replace' | 'append') =>
+    request<{ output: string }>(MTPROXYL_BASE, '/ipblock/import', {
+      method: 'POST',
+      body: JSON.stringify({ body, mode }),
+    }),
+  ipblockExportUrl: () => `${MTPROXYL_BASE}/ipblock/export`,
 
   geoblock: () => request<{ countries: string[] }>(MTPROXYL_BASE, '/geoblock'),
   geoblockAdd: (country: string) =>
