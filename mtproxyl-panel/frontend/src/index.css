@@ -123,10 +123,10 @@
   --amb-1: rgba(77, 163, 255, .40);
   --amb-2: rgba(90, 200, 250, .26);
   --amb-3: rgba(139, 139, 245, .30);
-  --dot: rgba(255, 255, 255, .075);
+  --dot: rgba(255, 255, 255, .045);
 
-  --gl-a: rgba(38, 44, 60, .62);
-  --gl-b: rgba(22, 27, 38, .52);
+  --gl-a: rgba(35, 41, 56, .93);
+  --gl-b: rgba(20, 25, 35, .93);
   --gl-brd: rgba(255, 255, 255, .13);
   --gl-hi: rgba(255, 255, 255, .18);
   --gl-lo: rgba(0, 0, 0, .45);
@@ -168,10 +168,10 @@
   --amb-1: rgba(10, 111, 255, .34);
   --amb-2: rgba(56, 189, 248, .30);
   --amb-3: rgba(91, 91, 214, .24);
-  --dot: rgba(16, 23, 37, .10);
+  --dot: rgba(16, 23, 37, .055);
 
-  --gl-a: rgba(255, 255, 255, .74);
-  --gl-b: rgba(255, 255, 255, .52);
+  --gl-a: rgba(255, 255, 255, .96);
+  --gl-b: rgba(252, 253, 255, .96);
   --gl-brd: rgba(255, 255, 255, .75);
   --gl-hi: rgba(255, 255, 255, .92);
   --gl-lo: rgba(16, 23, 37, .07);
@@ -231,8 +231,9 @@
     pointer-events: none;
     background-image: radial-gradient(circle at 1px 1px, var(--dot) 1px, transparent 0);
     background-size: 26px 26px;
-    -webkit-mask-image: radial-gradient(130% 85% at 50% 0%, #000 28%, transparent 76%);
-    mask-image: radial-gradient(130% 85% at 50% 0%, #000 28%, transparent 76%);
+    /* Без маски: маска на слой во весь экран — ещё один композиционный слой
+       ради затухания, которого почти не видно. Вместо неё сетка просто
+       сделана тише. */
   }
   h1, h2, h3 {
     font-weight: 640;
@@ -260,66 +261,31 @@
 }
 
 @layer components {
-  /* ═══ Стекло ═════════════════════════════════════════════════════════
-     Полупрозрачность сама по себе стеклом не выглядит. Нужны четыре вещи:
-     градиентная заливка, блик по верхней кромке, тень по нижней и
-     градиентная грань — светлая с одной стороны, тёмная с другой.
-     Последнюю глаз читает как преломление света на ребре. */
-  .glass {
-    position: relative;
-    overflow: hidden;
-    background: linear-gradient(180deg, var(--gl-a), var(--gl-b));
-    border: 1px solid var(--gl-brd);
-    box-shadow: inset 0 1px 0 var(--gl-hi), inset 0 -1px 0 var(--gl-lo), var(--sh-2);
-    -webkit-backdrop-filter: blur(var(--gl-blur)) saturate(190%);
-    backdrop-filter: blur(var(--gl-blur)) saturate(190%);
-  }
-  /* грань */
-  .glass::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    padding: 1px;
-    pointer-events: none;
-    z-index: 2;
-    background: linear-gradient(142deg, var(--gl-rim-a) 0%, transparent 34%,
-                                        transparent 66%, var(--gl-rim-b) 100%);
-    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-    -webkit-mask-composite: xor;
-    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-    mask-composite: exclude;
-  }
-  /* диагональный отсвет */
-  .glass::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    pointer-events: none;
-    background: linear-gradient(125deg, var(--gl-sheen) 0%, transparent 34%);
-  }
-  .glass > *:not(.glass-raw) {
-    position: relative;
-    z-index: 1;
-  }
+  /* ═══ Поверхность ════════════════════════════════════════════════════
+     Раньше здесь было настоящее стекло: backdrop-filter, грань через
+     mask-composite и диагональный отсвет отдельным слоем. На проде это
+     легло: у каждого такого элемента свой композиционный слой и свой
+     снимок фона на кадр, а элементов на странице десятки.
 
-  /* Плитка: облик стекла без его цены. Ставится там, где элементов десятки —
-     метрики, поля телеметрии, карточки пользователей. Под ними всё равно
-     лежит плавная подсветка, размывать в ней нечего. */
+     Теперь тот же облик собран из одной заливки: сверху светлее, снизу
+     темнее, блик по верхней кромке и тень по нижней — тенями, а не
+     слоями. Размытия нет, слоёв нет, рисуется как обычный прямоугольник.
+     Под поверхностью всё равно лежит плавная подсветка, размывать в ней
+     было нечего. */
+  .glass,
   .panel {
     position: relative;
-    background: linear-gradient(180deg, var(--gl-a), var(--gl-b));
+    background:
+      linear-gradient(125deg, var(--gl-sheen) 0%, transparent 34%),
+      linear-gradient(180deg, var(--gl-a), var(--gl-b));
     border: 1px solid var(--gl-brd);
+    box-shadow: inset 0 1px 0 var(--gl-hi), inset 0 -1px 0 var(--gl-lo), var(--sh-2);
+  }
+  /* Плитки мельче и их много — тень у них легче. */
+  .panel {
     box-shadow: inset 0 1px 0 var(--gl-hi), inset 0 -1px 0 var(--gl-lo), var(--sh-1);
   }
-  /* Браузеры без backdrop-filter (старый Firefox) получают плотную заливку —
-     вёрстка не ломается, просто нет размытия. */
-  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-    .glass {
-      background: rgb(var(--c-surface));
-    }
-  }
+
 
   .input {
     @apply w-full px-3 py-2 rounded-lg text-text-primary placeholder-text-secondary transition-colors;
