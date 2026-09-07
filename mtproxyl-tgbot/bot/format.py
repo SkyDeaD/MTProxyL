@@ -58,13 +58,19 @@ def status_text(st: dict, md: dict) -> str:
     running = st.get("status") == "running"
     icon = "🟢" if running else "🔴"
     mode_name = "Reanimator" if md.get("mode") == "reanimator" else "Manager"
+    web = st.get("web") or {}
+    web_only = web.get("proxy_mode") == "web"
     lines = [
         f"<b>MTProxyL v{esc(st.get('version', '?'))}</b> · {esc(mode_name)}",
         "",
         f"{icon} Прокси: <b>{'работает' if running else 'остановлен'}</b>",
-        f"Порт: <code>{esc(st.get('port', '?'))}</code>",
-        f"Домен (SNI): <code>{esc(st.get('domain') or '—')}</code>",
+        f"Режим: <code>{'Только WEB' if web_only else 'MTProto + WEB' if web.get('enabled') else 'MTProto'}</code>",
     ]
+    if web_only:
+        lines.append(f"WEB: <code>{esc(web.get('domain') or '—')}:443</code>")
+    else:
+        lines.append(f"Порт: <code>{esc(st.get('port', '?'))}</code>")
+        lines.append(f"Домен (SNI): <code>{esc(st.get('domain') or '—')}</code>")
     if running:
         lines.append(f"Аптайм: {human_duration(st.get('uptime'))}")
     lines.append(f"Соединений: {esc(st.get('connections', 0))}")
@@ -80,6 +86,13 @@ def status_text(st: dict, md: dict) -> str:
     lines.append(traffic)
     if md.get("mode") == "reanimator":
         lines.append(f"Цель: <code>{esc(md.get('detected_mode') or 'неизвестна')}</code>")
+    # WEB — отдельный тип прокси на том же порту, но со своим именем.
+    if web.get("enabled") and not web_only:
+        lines.append(f"WEB Proxy: <code>{esc(web.get('domain') or '—')}</code>"
+                     f" ({esc(web.get('carrier') or '')})")
+    if web.get("enabled") and web.get("frontend"):
+        frontend = "HAProxy" if web.get("frontend") == "haproxy" else "nginx"
+        lines.append(f"WEB frontend: <code>{frontend}</code>")
     return "\n".join(lines)
 
 
@@ -178,12 +191,21 @@ def link_text(label: str, tg_links: str | list[str]) -> str:
         f"<code>{esc(web_link(links[0]))}</code>",
     ]
     for extra in links[1:]:
-        parts += ["", f"<i>{esc(_link_kind(extra))}</i>", f"<code>{esc(web_link(extra))}</code>"]
+        # Кнопкой тоже: у WEB копия — это tg://webproxy, вручную её не набрать.
+        parts += [
+            "",
+            f"<i>{esc(_link_kind(extra))}</i>",
+            f'👉 <a href="{esc(extra)}">Подключиться</a>',
+            f"<code>{esc(web_link(extra))}</code>",
+        ]
     return "\n".join(parts)
 
 
 def _link_kind(tg_link: str) -> str:
-    """Вид ссылки виден по началу секрета: ee — TLS-маскировка, dd — secure."""
+    """Вид ссылки виден по началу секрета: ee — TLS-маскировка, dd — secure.
+    У WEB отдельная схема: там dd означает лишь представление секрета."""
+    if _is_webproxy(tg_link):
+        return "ещё одна ссылка (WEB)"
     secret = parse_qs(urlsplit(tg_link).query).get("secret", [""])[0]
     if secret.startswith("ee"):
         return "ещё одна ссылка (ee · TLS)"
@@ -192,8 +214,16 @@ def _link_kind(tg_link: str) -> str:
     return "ещё одна ссылка"
 
 
+def _is_webproxy(tg_link: str) -> bool:
+    return urlsplit(tg_link).netloc == "webproxy"
+
+
 def web_link(tg_link: str) -> str:
-    """tg://proxy?… → https://t.me/proxy?… — то же самое, но открывается везде."""
+    """tg://proxy?… → https://t.me/proxy?… — то же самое, но открывается везде.
+    У tg://webproxy аналога на t.me нет, поэтому её отдаём как есть: подменённая
+    ссылка вела бы в никуда."""
+    if _is_webproxy(tg_link):
+        return tg_link
     parts = urlsplit(tg_link)
     return f"https://t.me/proxy?{parts.query}" if parts.query else tg_link
 

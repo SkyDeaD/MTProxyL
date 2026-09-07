@@ -13,12 +13,17 @@ _FIX_ANS_ENGINE_VERSION=""
 
 # Пусто — «не задано»: такие параметры остаются на значениях по умолчанию.
 _IA_PORT=""; _IA_METRICS_PORT=""; _IA_API_PORT=""
+_IA_PROXY_MODE=""
 _IA_HOST=""; _IA_SNI=""; _IA_AD_TAG=""
 _IA_MASK=""; _IA_SNI_POLICY=""
 _IA_CPUS=""; _IA_MEMORY=""
 _IA_SECRETS=()
 _IA_SELFMASK_DOMAIN=""; _IA_SELFMASK_CERT=""; _IA_SELFMASK_EMAIL=""
 _IA_SELFMASK_TEMPLATE=""; _IA_SELFMASK_BACKEND_PORT=""
+_IA_WEB=""; _IA_WEB_DOMAIN=""; _IA_WEB_CARRIER=""; _IA_WEB_LAYOUT=""; _IA_WEB_FRONTEND=""
+_IA_WEB_HAPROXY_CERT=""
+_IA_WEB_PORT=""; _IA_WEB_SECRET_MODE=""
+_IA_WEB_DECOY=""; _IA_WEB_DECOY_UPSTREAM=""
 _IA_GEOIP=""
 _IA_BLOCK_FILE=""
 _IA_BLOCK_LIST=""
@@ -36,9 +41,11 @@ install_args_help() {
     --engine docker|binary     чем держать telemt: контейнер (по умолчанию)
                                или бинарник MTProxyL-Telemt под systemd
     --engine-version <тег>     версия telemt для бинарника (по умолчанию
-                               последняя), например 3.4.25
+                               последняя), например 3.5.5
 
   Прокси
+    --proxy-mode mtproto|web|combined
+                               обычный MTProto, только WEB или оба транспорта
     --port N                   порт прокси (по умолчанию 443)
     --metrics-port N           порт метрик Prometheus (по умолчанию свободный)
     --api-port N               порт REST API движка (по умолчанию свободный)
@@ -63,8 +70,23 @@ install_args_help() {
     --selfmask <домен>         включить Selfmask на этом домене
     --selfmask-cert letsencrypt|selfsigned
     --selfmask-email <email>   почта для Let's Encrypt (необязательна)
-    --selfmask-template stub|filemanager|catrunner|mekorunner|<url>
+    --selfmask-template stub|filemanager|catrunner|mekorunner|<url>|</path>
     --selfmask-backend-port N  локальный порт nginx (по умолчанию 8444)
+
+  WEB Proxy
+    --web yes|no               включить WEB Proxy
+    --web-layout shared|split  один порт с FakeTLS по SNI либо свой порт
+    --web-frontend nginx|haproxy|haproxy-nginx
+                               встроенный nginx, внешний HAProxy либо
+                               HAProxy перед встроенным nginx
+    --web-haproxy-cert ПУТЬ    PEM сертификат + ключ для фрагмента HAProxy
+    --web-domain <домен>       по умолчанию web.<домен selfmask>
+    --web-carrier https|https-lanes|websocket|websocket-lanes
+    --web-port N               публичный порт WEB для WEB-only и split
+    --web-secret-mode plain|dd
+    --web-decoy empty|site|upstream
+                               пустой ответ, каталог сайта либо HTTP-origin
+    --web-decoy-upstream URL   приватный HTTP-origin для режима upstream
 
   Дополнения
     --geoip yes|no             база GeoIP: страна, город и ASN в истории IP
@@ -128,6 +150,7 @@ _install_args_parse() {
                 esac ;;
             --engine-version) _IA_ENGINE_VERSION="$_v" ;;
             --port)          _IA_PORT="$_v" ;;
+            --proxy-mode)    _IA_PROXY_MODE="${_v,,}" ;;
             --metrics-port)  _IA_METRICS_PORT="$_v" ;;
             --api-port)      _IA_API_PORT="$_v" ;;
             --host|--ip)     _IA_HOST="$_v" ;;
@@ -164,6 +187,21 @@ _install_args_parse() {
                     no|n|нет|false|off) _FIX_ANS_MEKO="n" ;;
                     *) log_error "--meko: yes или no"; return 1 ;;
                 esac ;;
+            --web)
+                case "${_v,,}" in
+                    yes|y|да|true|on)   _IA_WEB="yes" ;;
+                    no|n|нет|false|off) _IA_WEB="no" ;;
+                    *) log_error "--web: yes или no"; return 1 ;;
+                esac ;;
+            --web-domain)      _IA_WEB_DOMAIN="${_v,,}" ;;
+            --web-carrier)     _IA_WEB_CARRIER="$_v" ;;
+            --web-layout)      _IA_WEB_LAYOUT="$_v" ;;
+            --web-frontend)    _IA_WEB_FRONTEND="${_v,,}" ;;
+            --web-haproxy-cert) _IA_WEB_HAPROXY_CERT="$_v" ;;
+            --web-port)        _IA_WEB_PORT="$_v" ;;
+            --web-secret-mode) _IA_WEB_SECRET_MODE="$_v" ;;
+            --web-decoy)       _IA_WEB_DECOY="${_v,,}" ;;
+            --web-decoy-upstream) _IA_WEB_DECOY_UPSTREAM="$_v" ;;
             --selfmask)              _IA_SELFMASK_DOMAIN="$_v" ;;
             --selfmask-cert)         _IA_SELFMASK_CERT="$_v" ;;
             --selfmask-email)        _IA_SELFMASK_EMAIL="$_v" ;;
@@ -195,6 +233,14 @@ _install_args_parse() {
 # откатывать некому, а ошибка в аргументе — обычное дело.
 _install_args_validate() {
     local _ok=true
+
+    case "${_IA_PROXY_MODE:-}" in
+        ""|mtproto|web|combined) ;;
+        *) log_error "--proxy-mode: mtproto, web или combined"; _ok=false ;;
+    esac
+    if [ "$_IA_PROXY_MODE" = "web" ] || [ "$_IA_PROXY_MODE" = "combined" ]; then
+        _IA_WEB="yes"
+    fi
 
     if [ -n "$_IA_PORT" ] && ! validate_port "$_IA_PORT"; then
         log_error "--port: 1..65535"; _ok=false
@@ -269,10 +315,89 @@ _install_args_validate() {
             letsencrypt|selfsigned) ;;
             *) log_error "--selfmask-cert: letsencrypt или selfsigned"; _ok=false ;;
         esac
+        if [ "$_IA_SELFMASK_CERT" = "selfsigned" ] && [ -z "$_IA_SELFMASK_DOMAIN" ] \
+           && [ "$_IA_WEB" = "yes" ]; then
+            log_error "WEB-клиент проверяет сертификат: без Selfmask нужен Let's Encrypt"
+            _ok=false
+        fi
     fi
+    if [ -n "$_IA_SELFMASK_BACKEND_PORT" ] && [ -z "$_IA_SELFMASK_DOMAIN" ]; then
+        log_error "--selfmask-backend-port применяется только вместе с --selfmask"
+        _ok=false
+    fi
+    if [ -n "$_IA_WEB_DOMAIN" ] && ! validate_domain "$_IA_WEB_DOMAIN"; then
+        log_error "--web-domain: домен, получили '${_IA_WEB_DOMAIN}'"; _ok=false
+    fi
+    if [ -n "$_IA_WEB_CARRIER" ]; then
+        case "$_IA_WEB_CARRIER" in
+            https|https-lanes|websocket|websocket-lanes) ;;
+            *) log_error "--web-carrier: https, https-lanes, websocket или websocket-lanes"; _ok=false ;;
+        esac
+    fi
+    if [ -n "$_IA_WEB_LAYOUT" ]; then
+        case "$_IA_WEB_LAYOUT" in
+            shared|split) ;;
+            *) log_error "--web-layout: shared или split"; _ok=false ;;
+        esac
+    fi
+    if [ -n "$_IA_WEB_FRONTEND" ]; then
+        case "$_IA_WEB_FRONTEND" in
+            nginx|haproxy|haproxy-nginx) ;;
+            *) log_error "--web-frontend: nginx, haproxy или haproxy-nginx"; _ok=false ;;
+        esac
+    fi
+    if [ -n "$_IA_WEB_HAPROXY_CERT" ] \
+       && [[ ! "$_IA_WEB_HAPROXY_CERT" =~ ^/[A-Za-z0-9_./+-]+$ ]]; then
+        log_error "--web-haproxy-cert: нужен безопасный абсолютный путь без пробелов"; _ok=false
+    fi
+    if [ -n "$_IA_WEB_HAPROXY_CERT" ] && [ "$_IA_WEB_FRONTEND" != "haproxy" ]; then
+        log_error "--web-haproxy-cert применяется только с --web-frontend haproxy"; _ok=false
+    fi
+    if [ "$_IA_WEB_FRONTEND" = "haproxy" ] && [ -n "$_IA_SELFMASK_DOMAIN" ]; then
+        log_error "внешний HAProxy нельзя включить вместе с Selfmask на публичном :443"; _ok=false
+    fi
+    if [ -n "$_IA_WEB_SECRET_MODE" ]; then
+        case "$_IA_WEB_SECRET_MODE" in
+            plain|dd) ;;
+            *) log_error "--web-secret-mode: plain или dd (ee движок в WEB не принимает)"; _ok=false ;;
+        esac
+    fi
+    if [ -n "$_IA_WEB_DECOY" ]; then
+        case "$_IA_WEB_DECOY" in
+            empty|site|upstream) ;;
+            *) log_error "--web-decoy: empty, site или upstream"; _ok=false ;;
+        esac
+    fi
+    if [ -n "$_IA_WEB_DECOY_UPSTREAM" ] \
+       && ! _validate_web_upstream "$_IA_WEB_DECOY_UPSTREAM" >/dev/null 2>&1; then
+        log_error "--web-decoy-upstream: нужен приватный URL http://IP[:порт]"; _ok=false
+    fi
+    if [ -n "$_IA_WEB_DECOY_UPSTREAM" ] && [ "$_IA_WEB_DECOY" != "upstream" ]; then
+        log_error "--web-decoy-upstream применяется только с --web-decoy upstream"; _ok=false
+    fi
+    if [ "$_IA_WEB_DECOY" = "upstream" ] && [ -z "$_IA_WEB_DECOY_UPSTREAM" ]; then
+        log_error "--web-decoy upstream требует --web-decoy-upstream URL"; _ok=false
+    fi
+    if [ "$_IA_WEB_DECOY" = "empty" ] && [ -n "$_IA_SELFMASK_TEMPLATE" ]; then
+        log_error "--selfmask-template не применяется с --web-decoy empty"; _ok=false
+    fi
+    if [ -n "$_IA_WEB_PORT" ] && ! validate_port "$_IA_WEB_PORT"; then
+        log_error "--web-port: 1..65535, получили '${_IA_WEB_PORT}'"; _ok=false
+    fi
+    if [ "$_IA_WEB" = "yes" ] && [ -z "$_IA_WEB_DOMAIN" ] && [ -z "$_IA_SELFMASK_DOMAIN" ]; then
+        log_error "--web yes требует --web-domain <домен> либо --selfmask <домен>"; _ok=false
+    fi
+    if [ "$_IA_WEB" != "yes" ] && { [ -n "$_IA_WEB_DOMAIN" ] || [ -n "$_IA_WEB_CARRIER" ] || \
+       [ -n "$_IA_WEB_LAYOUT" ] || [ -n "$_IA_WEB_PORT" ] || [ -n "$_IA_WEB_SECRET_MODE" ] || \
+       [ -n "$_IA_WEB_FRONTEND" ] || [ -n "$_IA_WEB_HAPROXY_CERT" ] || \
+       [ -n "$_IA_WEB_DECOY" ] || [ -n "$_IA_WEB_DECOY_UPSTREAM" ]; }; then
+        log_error "Параметры WEB заданы без --web yes"; _ok=false
+    fi
+
     if [ -n "$_IA_SELFMASK_CERT" ] || [ -n "$_IA_SELFMASK_EMAIL" ] || \
        [ -n "$_IA_SELFMASK_TEMPLATE" ] || [ -n "$_IA_SELFMASK_BACKEND_PORT" ]; then
-        [ -n "$_IA_SELFMASK_DOMAIN" ] || { log_error "Параметры Selfmask заданы без --selfmask <домен>"; _ok=false; }
+        [ -n "$_IA_SELFMASK_DOMAIN" ] || [ "$_IA_WEB" = "yes" ] || {
+            log_error "Параметры сайта/сертификата заданы без Selfmask или WEB"; _ok=false; }
     fi
 
     [ "$_ok" = "true" ]
@@ -310,6 +435,9 @@ run_installer_args() {
     # Дальше вопросов не будет: мастер фиксов и Selfmask читают готовые ответы.
     MTPROXYL_NONINTERACTIVE="true"
     MTPROXYL_MODE="manager"
+    PROXY_MODE="${_IA_PROXY_MODE:-mtproto}"
+    [ -z "$_IA_PROXY_MODE" ] && [ "$_IA_WEB" = "yes" ] && PROXY_MODE="combined"
+    WEB_ENABLED="false"
 
     show_banner
     draw_header "УСТАНОВКА АРГУМЕНТАМИ"
@@ -395,7 +523,12 @@ run_installer_args() {
     save_secrets
     ln -sf "${INSTALL_DIR}/mtproxyl.sh" /usr/local/bin/mtproxyl
 
-    run_fix_arsenal_wizard
+    if mtproto_is_enabled; then
+        run_fix_arsenal_wizard
+    else
+        log_info "MTProto-фиксы пропущены: выбран режим «Только WEB»"
+        run_meko_optimization_wizard
+    fi
 
     install_autostart_unit
     engine_clear_other_carrier
@@ -403,6 +536,7 @@ run_installer_args() {
     echo ""
     draw_header "ЗАПУСК ПРОКСИ"
     echo ""
+    if [ "$_IA_WEB" != "yes" ]; then
     run_proxy_container || {
         log_error "Не удалось запустить прокси"
         if engine_is_binary; then
@@ -411,11 +545,19 @@ run_installer_args() {
             echo -e "  ${DIM}Проверьте: docker logs mtproxyl${NC}"
         fi
     }
+    fi
 
     _install_args_autostart
 
     if [ -n "$_IA_SELFMASK_DOMAIN" ]; then
         _install_args_selfmask || log_warn "Selfmask не настроен — остальное установлено"
+    fi
+
+    if [ "$_IA_WEB" = "yes" ]; then
+        _install_args_web || {
+            log_error "Установка остановлена: WEB Proxy не поднялся"
+            return 1
+        }
     fi
 
     if [ "$_IA_GEOIP" = "yes" ]; then
@@ -528,4 +670,40 @@ _install_args_selfmask() {
         fi
     fi
     selfmask_setup
+}
+
+# WEB переиспользует Selfmask, если тот включён, либо поднимает сайт сам.
+_install_args_web() {
+    echo ""
+    draw_header "WEB PROXY"
+    echo ""
+    WEB_LAYOUT="${_IA_WEB_LAYOUT:-shared}"
+    WEB_FRONTEND="${_IA_WEB_FRONTEND:-nginx}"
+    WEB_HAPROXY_CERT="${_IA_WEB_HAPROXY_CERT:-}"
+    case "${_IA_WEB_DECOY:-}" in
+        site) WEB_DECOY_MODE="static_directory" ;;
+        upstream) WEB_DECOY_MODE="http_upstream" ;;
+        empty) WEB_DECOY_MODE="empty" ;;
+        *) [ -n "$_IA_SELFMASK_TEMPLATE" ] && WEB_DECOY_MODE="static_directory" || WEB_DECOY_MODE="empty" ;;
+    esac
+    WEB_DECOY_UPSTREAM="${_IA_WEB_DECOY_UPSTREAM:-}"
+    [ -n "$_IA_WEB_DOMAIN" ]      && WEB_DOMAIN="$_IA_WEB_DOMAIN"
+    [ -n "$_IA_WEB_CARRIER" ]     && WEB_CARRIER="$_IA_WEB_CARRIER"
+    [ -n "$_IA_WEB_SECRET_MODE" ] && WEB_SECRET_MODE="$_IA_WEB_SECRET_MODE"
+    if [ -n "$_IA_WEB_PORT" ]; then
+        # В shared совместного режима WEB делит публичный порт с MTProto.
+        if web_is_only_mode || [ "$WEB_LAYOUT" = "split" ]; then
+            WEB_PUBLIC_PORT="$_IA_WEB_PORT"
+        else
+            log_warn "--web-port осмыслен для WEB-only и --web-layout split, значение не применено"
+        fi
+    fi
+    if [ "${SELFMASK_ENABLED:-false}" != "true" ]; then
+        SELFMASK_DOMAIN="$(web_domain)"
+        SELFMASK_CERT_MODE="${_IA_SELFMASK_CERT:-letsencrypt}"
+        SELFMASK_CERT_EMAIL="${_IA_SELFMASK_EMAIL}"
+        [ -n "$_IA_SELFMASK_TEMPLATE" ] && SELFMASK_SITE_SOURCE="$_IA_SELFMASK_TEMPLATE"
+    fi
+    save_settings
+    web_enable
 }

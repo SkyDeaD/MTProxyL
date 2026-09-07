@@ -93,8 +93,7 @@ _mig_handle_host_key_change() {
         log_error "Забыть старый ключ и повторить: ssh-keygen -R ${_MIG_HOST}"
         return 1
     fi
-    echo -en "  ${BOLD}Систему на ${_MIG_HOST} переставляли — забыть старый ключ? [y/N]:${NC} "
-    local _yn; read_line _yn
+    local _yn; read_line _yn "  ${BOLD}Систему на ${_MIG_HOST} переставляли — забыть старый ключ? [y/N]:${NC} "
     [[ "$_yn" =~ ^[yY] ]] || {
         log_error "Оставили как есть. Разберитесь с ключом хоста и повторите переезд"
         log_info "Забыть вручную: ssh-keygen -R ${_MIG_HOST}"
@@ -138,8 +137,7 @@ _mig_ensure_auth() {
     echo ""
     echo -e "  ${DIM}Скопируем ваш публичный ключ на новый сервер. Пароль спросит${NC}"
     echo -e "  ${DIM}сам ssh-copy-id — MTProxyL его не видит и не сохраняет.${NC}"
-    echo -en "  ${BOLD}Скопировать ключ? [Y/n]:${NC} "
-    local _yn; read_line _yn
+    local _yn; read_line _yn "  ${BOLD}Скопировать ключ? [Y/n]:${NC} "
     [[ "$_yn" =~ ^[nN] ]] && { log_error "Без входа по ключу переезд невозможен"; return 1; }
 
     [ -f "${HOME}/.ssh/id_ed25519.pub" ] || [ -f "${HOME}/.ssh/id_rsa.pub" ] || {
@@ -169,6 +167,9 @@ _mig_check_local() {
     [ -f "$SETTINGS_FILE" ] || { log_error "Настройки не найдены — переносить нечего"; return 1; }
     if _superexpert_active 2>/dev/null; then
         log_info "Включён режим супер эксперта — ваш конфиг движка поедет вместе с остальным"
+    fi
+    if [ -f "${NGINX_CUSTOM_FILE:-/opt/mtproxyl/nginx-custom.conf}" ]; then
+        log_info "Пользовательский конфиг nginx поедет вместе с остальным"
     fi
     return 0
 }
@@ -268,6 +269,19 @@ _mig_warn_dns() {
         esac
     fi
 
+    if web_is_enabled 2>/dev/null; then
+        local _web_domain; _web_domain=$(web_domain 2>/dev/null)
+        if [ -n "$_web_domain" ] && { [ "${SELFMASK_ENABLED:-false}" != "true" ] \
+           || [ "$_web_domain" != "${SELFMASK_DOMAIN:-}" ]; }; then
+            _mig_dns_ready "$_web_domain"
+            case $? in
+                0) log_success "DNS ${_web_domain} уже смотрит на новую машину — WEB поднимется сразу" ;;
+                1) log_warn "WEB: A-запись ${_web_domain} ведёт на $(_mig_resolve_a "$_web_domain"), а не на ${_MIG_NEW_IP}"; _blocked=1 ;;
+                2) log_warn "WEB: A-запись ${_web_domain} проверить не вышло"; _blocked=1 ;;
+            esac
+        fi
+    fi
+
     local _acme; _acme=$(_mig_panel_acme_domain 2>/dev/null)
     if [ -n "$_acme" ] && [ "$_MIG_WITH_PANEL" != "no" ]; then
         _mig_dns_ready "$_acme"
@@ -290,13 +304,13 @@ _mig_warn_dns() {
     echo ""
     echo -e "  ${YELLOW}${BOLD}Сертификат Let's Encrypt выпускается в момент установки.${NC}"
     echo -e "  ${DIM}Пока A-запись смотрит на старый сервер, проверка домена уйдёт${NC}"
-    echo -e "  ${DIM}туда же, и на новой машине не поднимутся ни Selfmask, ни HTTPS${NC}"
-    echo -e "  ${DIM}панели. Переезд при этом пройдёт — прокси, секреты и фиксы${NC}"
+    echo -e "  ${DIM}туда же, и на новой машине не поднимутся WEB, Selfmask или HTTPS${NC}"
+    echo -e "  ${DIM}панели. Переезд при этом пройдёт — настройки и секреты${NC}"
     echo -e "  ${DIM}встанут, но их придётся доделать вручную.${NC}"
     echo ""
     echo -e "  ${BOLD}Как лучше:${NC} сначала переведите A-запись на ${_MIG_NEW_IP:-новый адрес},"
     echo -e "  дождитесь, пока она разойдётся, и повторите переезд."
-    echo -e "  ${DIM}Доделать потом: mtproxyl selfmask setup, mtproxyl panel cert <домен>${NC}"
+    echo -e "  ${DIM}Доделать потом: mtproxyl web enable, mtproxyl selfmask setup, mtproxyl panel cert <домен>${NC}"
     return 1
 }
 
@@ -304,6 +318,7 @@ _mig_warn_dns() {
 # и должно заработать там.
 _mig_build_args() {
     local -a _a=(--mode manager --force)
+    _a+=(--proxy-mode "${PROXY_MODE:-mtproto}")
     # Движок переезжает тем же носителем: у кого бинарник — тому и версию,
     # чтобы на новой машине встало ровно то же, что работало на старой.
     if [ "$(engine_backend)" = "binary" ]; then
@@ -368,6 +383,18 @@ _mig_build_args() {
         [ -n "${SELFMASK_SITE_SOURCE:-}" ] && _a+=(--selfmask-template "$SELFMASK_SITE_SOURCE")
         [ -n "${SELFMASK_NGINX_BACKEND_PORT:-}" ] && _a+=(--selfmask-backend-port "$SELFMASK_NGINX_BACKEND_PORT")
     fi
+    if web_is_enabled 2>/dev/null; then
+        _a+=(--web yes --web-layout "${WEB_LAYOUT:-shared}")
+        _a+=(--web-carrier "${WEB_CARRIER:-websocket}")
+        _a+=(--web-secret-mode "${WEB_SECRET_MODE:-dd}")
+        [ -n "${WEB_DOMAIN:-}" ] && _a+=(--web-domain "$WEB_DOMAIN")
+        { web_is_only_mode || [ "${WEB_LAYOUT:-shared}" = "split" ]; } \
+            && _a+=(--web-port "${WEB_PUBLIC_PORT:-443}")
+        if [ "${SELFMASK_ENABLED:-false}" != "true" ]; then
+            [ -n "${SELFMASK_CERT_EMAIL:-}" ] && _a+=(--selfmask-email "$SELFMASK_CERT_EMAIL")
+            [ -n "${SELFMASK_SITE_SOURCE:-}" ] && _a+=(--selfmask-template "$SELFMASK_SITE_SOURCE")
+        fi
+    fi
 
     printf '%s\n' "${_a[@]}"
 }
@@ -385,6 +412,8 @@ _mig_quote() {
 _MIG_SECRETS_SNAPSHOT=""
 
 _MIG_SUPEREXPERT_SNAPSHOT=""
+_MIG_NGINX_CUSTOM_SNAPSHOT=""
+_MIG_NGINX_CUSTOM_WAS_ACTIVE="false"
 
 _mig_snapshot_superexpert() {
     _superexpert_active 2>/dev/null || return 0
@@ -415,6 +444,41 @@ _mig_push_superexpert() {
         _mig_ssh "mtproxyl restart" </dev/null >/dev/null 2>&1 || true
     else
         log_warn "Конфиг положили, но режим не включился — на новом сервере: mtproxyl superexpert on"
+    fi
+}
+
+_mig_snapshot_nginx_custom() {
+    [ -f "$NGINX_CUSTOM_FILE" ] || return 0
+    _MIG_NGINX_CUSTOM_SNAPSHOT=$(mktemp /tmp/.mtproxyl-migrate-nginx.XXXXXX) || {
+        _MIG_NGINX_CUSTOM_SNAPSHOT=""
+        return 0
+    }
+    chmod 600 "$_MIG_NGINX_CUSTOM_SNAPSHOT"
+    cat "$NGINX_CUSTOM_FILE" > "$_MIG_NGINX_CUSTOM_SNAPSHOT"
+    nginx_custom_active 2>/dev/null && _MIG_NGINX_CUSTOM_WAS_ACTIVE="true"
+}
+
+_mig_push_nginx_custom() {
+    [ -n "$_MIG_NGINX_CUSTOM_SNAPSHOT" ] && [ -f "$_MIG_NGINX_CUSTOM_SNAPSHOT" ] || return 0
+    log_info "Переносим пользовательский конфиг nginx..."
+    if ! _mig_scp "$_MIG_NGINX_CUSTOM_SNAPSHOT" "/tmp/mtproxyl-nginx-custom.conf"; then
+        log_warn "Пользовательский конфиг nginx не доехал"
+        return 0
+    fi
+    if ! _mig_ssh "install -m 600 -o root -g root /tmp/mtproxyl-nginx-custom.conf ${NGINX_CUSTOM_FILE} && rm -f /tmp/mtproxyl-nginx-custom.conf" \
+        </dev/null >/dev/null 2>&1; then
+        log_warn "Не удалось положить пользовательский конфиг nginx"
+        return 0
+    fi
+    if [ "$_MIG_NGINX_CUSTOM_WAS_ACTIVE" = "true" ]; then
+        if _mig_ssh "MTPROXYL_ASSUME_YES=1 mtproxyl selfmask nginx-config on" </dev/null >/dev/null 2>&1; then
+            log_success "Пользовательский конфиг nginx включён"
+            log_warn "Проверьте в нём домены, адреса и пути на новом сервере"
+        else
+            log_warn "Конфиг перенесён, но режим не включился — проверьте nginx -t на новом сервере"
+        fi
+    else
+        log_success "Пользовательский конфиг nginx перенесён и оставлен выключенным"
     fi
 }
 
@@ -523,8 +587,7 @@ _mig_ask_extras() {
             echo -e "  ${YELLOW}Ветка ${GITHUB_BRANCH} — панель будет собираться из исходников${NC}"
             echo -e "  ${DIM}в Docker: несколько минут и заметная нагрузка на новую машину.${NC}"
         fi
-        echo -en "  ${BOLD}Переносить панель? [Y/n]:${NC} "
-        read_line _yn
+        read_line _yn "  ${BOLD}Переносить панель? [Y/n]:${NC} "
         [[ "$_yn" =~ ^[nN] ]] && _MIG_WITH_PANEL="no" || _MIG_WITH_PANEL="yes"
     fi
 
@@ -532,8 +595,7 @@ _mig_ask_extras() {
         echo ""
         echo -e "  ${DIM}Бот поедет с прежним токеном и админами. Два бота на одном${NC}"
         echo -e "  ${DIM}токене не уживутся — старого придётся остановить.${NC}"
-        echo -en "  ${BOLD}Переносить телеграм-бота? [Y/n]:${NC} "
-        read_line _yn
+        read_line _yn "  ${BOLD}Переносить телеграм-бота? [Y/n]:${NC} "
         [[ "$_yn" =~ ^[nN] ]] && _MIG_WITH_TGBOT="no" || _MIG_WITH_TGBOT="yes"
     fi
     return 0
@@ -546,6 +608,7 @@ migrate_run() {
     _mig_check_remote || return 1
     _mig_snapshot_secrets
     _mig_snapshot_superexpert
+    _mig_snapshot_nginx_custom
 
     _mig_ask_extras
 
@@ -565,6 +628,8 @@ migrate_run() {
     echo -e "  ${BOLD}Selfmask:${NC}   $([ "${SELFMASK_ENABLED:-false}" = "true" ] && echo "${SELFMASK_DOMAIN} (${SELFMASK_CERT_MODE:-letsencrypt})" || echo "${DIM}выключен${NC}")"
     _superexpert_active 2>/dev/null && \
         echo -e "  ${BOLD}Супер эксперт:${NC} свой конфиг движка едет вместе с остальным"
+    [ -f "$NGINX_CUSTOM_FILE" ] && \
+        echo -e "  ${BOLD}Свой nginx:${NC}  конфиг едет вместе с остальным$([ "$_MIG_NGINX_CUSTOM_WAS_ACTIVE" = "true" ] || echo " ${DIM}(выключен)${NC}")"
     echo -e "  ${BOLD}Панель:${NC}     $(if ! panel_installed 2>/dev/null; then echo "${DIM}не установлена${NC}"; elif [ "$_MIG_WITH_PANEL" = "no" ]; then echo "${DIM}пропускаем${NC}"; else echo "переносим"; fi)"
     echo -e "  ${BOLD}Бот:${NC}        $(if ! tgbot_installed 2>/dev/null; then echo "${DIM}не установлен${NC}"; elif [ "$_MIG_WITH_TGBOT" = "no" ]; then echo "${DIM}пропускаем${NC}"; else echo "переносим"; fi)"
     echo ""
@@ -642,6 +707,7 @@ migrate_run() {
     fi
 
     _mig_push_secrets
+    _mig_push_nginx_custom
     _mig_push_superexpert
 
     if [ "$_MIG_WITH_PANEL" != "no" ]; then _mig_push_panel; fi
@@ -649,6 +715,7 @@ migrate_run() {
 
     [ -n "$_MIG_SECRETS_SNAPSHOT" ] && rm -f "$_MIG_SECRETS_SNAPSHOT"
     [ -n "$_MIG_SUPEREXPERT_SNAPSHOT" ] && rm -f "$_MIG_SUPEREXPERT_SNAPSHOT"
+    [ -n "$_MIG_NGINX_CUSTOM_SNAPSHOT" ] && rm -f "$_MIG_NGINX_CUSTOM_SNAPSHOT"
     _mig_finish
 }
 
@@ -683,8 +750,7 @@ _mig_finish() {
     echo -e "  ${BOLD}Старая копия на этом сервере${NC}"
     echo -e "  ${DIM}Пока она жива, два прокси делят один токен бота и одни ссылки.${NC}"
     echo -e "  ${DIM}Удалять стоит после того, как проверите новый сервер.${NC}"
-    echo -en "  ${BOLD}Удалить MTProxyL здесь сейчас? [y/N]:${NC} "
-    local _yn; read_line _yn
+    local _yn; read_line _yn "  ${BOLD}Удалить MTProxyL здесь сейчас? [y/N]:${NC} "
     if [[ "$_yn" =~ ^[yY] ]]; then
         uninstall
     else

@@ -4,6 +4,19 @@
 _METRICS_CACHE=""
 _METRICS_CACHE_AGE=0
 
+# telemt 3.5.x переименовал счётчики октетов, добавив суффикс _total, и убрал
+# telemt_connections_current. Приводим выдачу к одному виду на входе, чтобы
+# разбор ниже одинаково работал со старым и новым движком.
+_normalize_metrics() {
+    awk '
+        /^telemt_user_octets_(from|to)_client_total\{/ { sub(/_total\{/, "{") }
+        /^telemt_connections_current[{ ]/              { seen_cur = 1 }
+        /^telemt_user_connections_current\{/           { ucur += $NF }
+        { print }
+        END { if (NR > 0 && !seen_cur) printf "telemt_connections_current %d\n", ucur+0 }
+    '
+}
+
 _fetch_metrics() {
     local now; now=$(date +%s)
     if [ -n "$_METRICS_CACHE" ] && [ $((now - _METRICS_CACHE_AGE)) -lt 2 ]; then
@@ -11,7 +24,7 @@ _fetch_metrics() {
     fi
     local _mport="${PROXY_METRICS_PORT:-9090}"
     [ "${MTPROXYL_MODE:-manager}" = "reanimator" ] && _mport=$(_get_telemt_metrics_port)
-    _METRICS_CACHE=$(curl -s --max-time 2 "http://127.0.0.1:${_mport}/metrics" 2>/dev/null)
+    _METRICS_CACHE=$(curl -s --max-time 2 "http://127.0.0.1:${_mport}/metrics" 2>/dev/null | _normalize_metrics)
     _METRICS_CACHE_AGE=$now
     [ -n "$_METRICS_CACHE" ] && echo "$_METRICS_CACHE" && return 0
     return 1
@@ -86,7 +99,7 @@ flush_traffic_to_disk() {
     mkdir -p "$_stats_dir" 2>/dev/null
 
     local m
-    m=$(curl -s --max-time 2 "http://127.0.0.1:${PROXY_METRICS_PORT:-9090}/metrics" 2>/dev/null) || return 0
+    m=$(_fetch_metrics) || return 0
 
     # Текущие значения из Prometheus (сессионные — сбрасываются при рестарте)
     local _cur_in _cur_out
@@ -1056,7 +1069,7 @@ show_status() {
         echo -e "  ${BOLD}Цель:${NC}        ${DETECTED_MODE:-unknown}$([ -n "${DETECTED_CONTAINER:-}" ] && echo " (${DETECTED_CONTAINER})")"
         echo -e "  ${BOLD}Конфиг цели:${NC} ${DETECTED_CONFIG_PATH:-не найден}"
         echo -e "  ${BOLD}Порт:${NC}        ${PROXY_PORT}            ${BOLD}Время работы:${NC} ${_up}"
-        echo -e "  ${BOLD}Домен(SNI):${NC}  $(_current_sni_domain 2>/dev/null || echo '?')"
+        echo -e "  ${BOLD}Домен(SNI):${NC}  $(_current_sni_display)"
         if fetch_target_stats 2>/dev/null; then
             echo -e "  ${BOLD}Трафик:${NC}      $(format_bytes "${TARGET_STATS_OCTETS:-0}")"
             echo -e "  ${BOLD}Соединения:${NC}  ${TARGET_STATS_CONNS:-0}  ${BOLD}Уник. IP:${NC} ${TARGET_STATS_IPS:-0}"
@@ -1122,9 +1135,19 @@ show_status_json() {
     # панель) читают одно поле в обоих режимах, а не гадают по mode.
     local _mips=0
     [ "$status" = "running" ] && _mips=$(_engine_unique_ips 2>/dev/null || echo 0)
-    printf '{"version":"%s","mode":"manager","status":"%s","port":%d,"domain":"%s","uptime":%d,"connections":%d,"unique_ips":%d,"traffic_in":%d,"traffic_out":%d,"traffic_total":%d}\n' \
+    # WEB — отдельный тип прокси на том же движке: боту и панели надо знать,
+    # включён ли он и по какому имени, а порт остаётся публичным PROXY_PORT.
+    local _web='null'
+    if web_is_enabled 2>/dev/null; then
+        _web=$(printf '{"enabled":true,"domain":"%s","layout":"%s","carrier":"%s"}' \
+            "$(json_escape "$(web_domain 2>/dev/null)")" \
+            "$(json_escape "${WEB_LAYOUT:-shared}")" \
+            "$(json_escape "${WEB_CARRIER:-websocket}")")
+    fi
+    printf '{"version":"%s","mode":"manager","status":"%s","port":%d,"domain":"%s","uptime":%d,"connections":%d,"unique_ips":%d,"traffic_in":%d,"traffic_out":%d,"traffic_total":%d,"web":%s}\n' \
         "$VERSION" "$status" "$PROXY_PORT" "$PROXY_DOMAIN" "$uptime_secs" "${connections:-0}" \
-        "${_mips:-0}" "${traffic_in:-0}" "${traffic_out:-0}" "$(( ${traffic_in:-0} + ${traffic_out:-0} ))"
+        "${_mips:-0}" "${traffic_in:-0}" "${traffic_out:-0}" "$(( ${traffic_in:-0} + ${traffic_out:-0} ))" \
+        "$_web"
 }
 
 show_config() {
@@ -1265,7 +1288,7 @@ show_server_info() {
         echo -e "    Скрипт:       v${VERSION} ${DIM}(режим: reanimator)${NC}"
         echo -e "    Цель:         ${DETECTED_MODE:-unknown}$([ -n "$DETECTED_CONTAINER" ] && echo " (${DETECTED_CONTAINER})")"
         echo -e "    Конфиг цели:  ${DETECTED_CONFIG_PATH:-не найден}"
-        echo -e "    Домен(SNI):   $(_current_sni_domain 2>/dev/null || echo '?')"
+        echo -e "    Домен(SNI):   $(_current_sni_display)"
         echo -e "    Порт:         ${PROXY_PORT}"
         local _mh _mp
         _mh=$(_toml_get_string_in_section "censorship" "mask_host" "${DETECTED_CONFIG_PATH:-}" 2>/dev/null)
@@ -1380,7 +1403,10 @@ show_metrics() {
     # Соединения
     echo -e "  ${BRIGHT_CYAN}${BOX_V}${NC}  ${BOLD}Соединения${NC}$(printf '%*s' $((W - 12)))${BRIGHT_CYAN}${BOX_V}${NC}"
     echo -e "  ${BRIGHT_CYAN}${BOX_V}${NC}    ${DIM}Всего:${NC} ${c_tot:-0}   ${DIM}Авториз.:${NC} ${BRIGHT_GREEN}${c_good}${NC}   ${DIM}Отклонено:${NC} ${BRIGHT_RED}${c_bad:-0}${NC}$(printf '%*s' 1)${BRIGHT_CYAN}${BOX_V}${NC}"
-    echo -e "  ${BRIGHT_CYAN}${BOX_V}${NC}    ${DIM}Активных:${NC} ${c_cur:-0}  (ME: ${c_me:-0}  Direct: ${c_dir:-0})$(printf '%*s' 1)${BRIGHT_CYAN}${BOX_V}${NC}"
+    # Разбивку ME/Direct движок отдаёт не всегда — с 3.5.x этих счётчиков нет.
+    local c_split=""
+    [ $(( ${c_me:-0} + ${c_dir:-0} )) -gt 0 ] && c_split="  (ME: ${c_me:-0}  Direct: ${c_dir:-0})"
+    echo -e "  ${BRIGHT_CYAN}${BOX_V}${NC}    ${DIM}Активных:${NC} ${c_cur:-0}${c_split}$(printf '%*s' 1)${BRIGHT_CYAN}${BOX_V}${NC}"
     echo -e "  ${BRIGHT_CYAN}${BOX_LT}$(_repeat "$BOX_H" $W)${BOX_RT}${NC}"
 
     # Upstream

@@ -87,6 +87,7 @@ show_main_menu() {
             fi
         else
             echo -e "  ${BOLD}Движок:${NC}      telemt v$(get_telemt_version)$(engine_is_binary && echo " ${DIM}(бинарник)${NC}")  ${BOLD}Статус:${NC} ${status_str}"
+            echo -e "  ${BOLD}Транспорт:${NC}   $(proxy_transport_mode_title)"
             # Показываем только когда режим включён — выключенный не упоминаем
             if _superexpert_active; then
                 echo -e "  ${YELLOW}${BOLD}Режим супер эксперта включён${NC} ${DIM}(конфиг: ${SUPEREXPERT_FILE})${NC}"
@@ -106,13 +107,21 @@ show_main_menu() {
             # обманывать. Дальше сразу состояние фиксов.
             :
         else
-        echo -e "  ${BOLD}Порт:${NC}        ${PROXY_PORT}            ${BOLD}Работает:${NC} ${uptime_str}"
+        if web_is_only_mode 2>/dev/null; then
+            echo -e "  ${BOLD}WEB порт:${NC}    $(web_public_port)            ${BOLD}Работает:${NC} ${uptime_str}"
+        else
+            echo -e "  ${BOLD}Порт:${NC}        ${PROXY_PORT}            ${BOLD}Работает:${NC} ${uptime_str}"
+        fi
         # Порт цели разошёлся с нашим — фиксы висят не на том порту
         if [ "$_reanimator" = "true" ] && [ -n "${DETECTED_PORT:-}" ] && [ "${DETECTED_PORT}" != "${PROXY_PORT}" ]; then
             echo -e "  ${YELLOW}⚠ Порт цели ${DETECTED_PORT}, а фиксы применяются к ${PROXY_PORT}${NC}"
             echo -e "  ${DIM}  Синхронизировать: Цель/режим → Повторить обнаружение${NC}"
         fi
-        echo -e "  ${BOLD}Домен(SNI):${NC}  $(_current_sni_domain 2>/dev/null || echo "$PROXY_DOMAIN")"
+        if web_is_only_mode 2>/dev/null; then
+            echo -e "  ${BOLD}WEB домен:${NC}   $(web_domain 2>/dev/null || echo —)"
+        else
+            echo -e "  ${BOLD}Домен(SNI):${NC}  $(_current_sni_display)"
+        fi
         if [ "$_reanimator" = "true" ]; then
             if [ "$_target_stats_ok" = "true" ]; then
                 echo -e "  ${BOLD}Трафик:${NC}      $(format_bytes "${TARGET_STATS_OCTETS:-0}")  ${BOLD}Соед.:${NC} ${conns}  ${BOLD}Уник. IP:${NC} ${TARGET_STATS_IPS:-0}"
@@ -155,6 +164,9 @@ show_main_menu() {
 
         echo -e "  ${BOLD}MEKO оптим.:${NC} $(meko_opt_status 2>/dev/null || echo "${DIM}—${NC}")"
         echo -e "  ${BOLD}Selfmask:${NC}    $(selfmask_status_line 2>/dev/null || echo "${DIM}—${NC}")"
+        if [ "$_reanimator" != "true" ]; then
+            echo -e "  ${BOLD}WEB Proxy:${NC}   $(web_status_line 2>/dev/null || echo "${DIM}—${NC}")"
+        fi
         # Только когда включён: на обычной установке строка была бы шумом.
         warp_menu_line 2>/dev/null || true
 
@@ -248,20 +260,21 @@ show_main_menu() {
             echo -e "  ${BRIGHT_CYAN}[2]${NC}   Управление секретами (пользователями)"
             echo -e "  ${BRIGHT_CYAN}[3]${NC}   Ссылки на прокси"
             echo -e "  ${BRIGHT_CYAN}[4]${NC}   Настройки"
-            echo -e "  ${BRIGHT_CYAN}[5]${NC}   Безопасность и маршрутизация"
-            echo -e "  ${BRIGHT_CYAN}[6]${NC}   Логи и трафик"
-            echo -e "  ${BRIGHT_CYAN}[7]${NC}   NFT лимитер, Zapret2 и фиксы"
-            echo -e "  ${BRIGHT_CYAN}[8]${NC}   Движок Telemt"
-            echo -e "  ${BRIGHT_CYAN}[9]${NC}   Обновление, бэкапы и миграция"
-            echo -e "  ${BRIGHT_CYAN}[10]${NC}  Режим эксперта (override поверх конфига движка)"
-            echo -e "  ${BRIGHT_CYAN}[11]${NC}  Режим супер эксперта (свой конфиг движка)"
-            echo -e "  ${BRIGHT_CYAN}[12]${NC}  Телеграм бот  ${DIM}$(bot_status_line)${NC}"
-            echo -e "  ${BRIGHT_CYAN}[13]${NC}  Дополнения (утилиты)"
-            echo -e "  ${BRIGHT_CYAN}[14]${NC}  Цель / режим (Manager ⇄ Reanimator)"
-            echo -e "  ${BRIGHT_CYAN}[15]${NC}  Информация"
+            echo -e "  ${BRIGHT_CYAN}[5]${NC}   WEB Proxy  ${DIM}$(web_status_line)${NC}"
+            echo -e "  ${BRIGHT_CYAN}[6]${NC}   Безопасность и маршрутизация"
+            echo -e "  ${BRIGHT_CYAN}[7]${NC}   Логи и трафик"
+            echo -e "  ${BRIGHT_CYAN}[8]${NC}   NFT лимитер, Zapret2 и фиксы"
+            echo -e "  ${BRIGHT_CYAN}[9]${NC}   Движок Telemt"
+            echo -e "  ${BRIGHT_CYAN}[10]${NC}   Обновление, бэкапы и миграция"
+            echo -e "  ${BRIGHT_CYAN}[11]${NC}  Режим эксперта (override поверх конфига движка)"
+            echo -e "  ${BRIGHT_CYAN}[12]${NC}  Режим супер эксперта (свой конфиг движка)"
+            echo -e "  ${BRIGHT_CYAN}[13]${NC}  Телеграм бот  ${DIM}$(bot_status_line)${NC}"
+            echo -e "  ${BRIGHT_CYAN}[14]${NC}  Дополнения (утилиты)"
+            echo -e "  ${BRIGHT_CYAN}[15]${NC}  Цель / режим (Manager ⇄ Reanimator)"
+            echo -e "  ${BRIGHT_CYAN}[16]${NC}  Информация"
             echo ""
-            echo -e "  ${BRIGHT_CYAN}[16]${NC}  Установка / переустановка"
-            echo -e "  ${RED}[17]${NC}  Удаление"
+            echo -e "  ${BRIGHT_CYAN}[17]${NC}  Установка / переустановка"
+            echo -e "  ${RED}[18]${NC}  Удаление"
             echo -e "  ${BRIGHT_CYAN}[0]${NC}   Выход"
             echo ""
             choice=$(read_choice "выбор" "0")
@@ -270,19 +283,20 @@ show_main_menu() {
                 2)  tui_secrets_menu ;;
                 3)  tui_links_menu ;;
                 4)  tui_settings_menu ;;
-                5)  tui_security_menu ;;
-                6)  tui_traffic_menu ;;
-                7)  tui_nft_menu ;;
-                8)  tui_engine_menu ;;
-                9)  tui_backup_menu ;;
-                10) tui_expert_menu ;;
-                11) tui_superexpert_menu ;;
-                12) tui_bot_menu ;;
-                13) tui_addons_menu ;;
-                14) tui_target_menu ;;
-                15) show_server_info; press_any_key ;;
-                16) run_installer ;;
-                17) uninstall; exit 0 ;;
+                5)  tui_web_menu ;;
+                6)  tui_security_menu ;;
+                7)  tui_traffic_menu ;;
+                8)  tui_nft_menu ;;
+                9)  tui_engine_menu ;;
+                10)  tui_backup_menu ;;
+                11) tui_expert_menu ;;
+                12) tui_superexpert_menu ;;
+                13) tui_bot_menu ;;
+                14) tui_addons_menu ;;
+                15) tui_target_menu ;;
+                16) show_server_info; press_any_key ;;
+                17) run_installer ;;
+                18) uninstall; exit 0 ;;
                 0)  exit 0 ;;
             esac
         fi

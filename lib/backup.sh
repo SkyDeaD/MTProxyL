@@ -14,10 +14,12 @@ create_backup() {
     rm -f "$meta_tmp"
 
     local files=()
-    for f in settings.conf secrets.conf upstreams.conf nft-rules.conf expert.conf tunings.conf superexpert.toml backup_meta.txt; do
+    for f in settings.conf secrets.conf upstreams.conf nft-rules.conf expert.conf tunings.conf \
+             superexpert.toml nginx-custom.conf selfmask-manager.conf selfmask-reanimator.conf backup_meta.txt; do
         [ -f "${INSTALL_DIR}/$f" ] && files+=("$f")
     done
     [ -d "$STATS_DIR" ] && files+=("relay_stats")
+    [ -d "$GEOBLOCK_CACHE_DIR" ] && files+=("geoblock")
 
     tar czf "$backup_file" -C "$INSTALL_DIR" --exclude='*.lock' "${files[@]}" 2>/dev/null
     chmod 600 "$backup_file"
@@ -45,8 +47,7 @@ restore_backup() {
         echo ""
     fi
 
-    echo -en "  ${YELLOW}Текущая конфигурация будет перезаписана. Продолжить? [y/N]:${NC} "
-    local confirm; read_line confirm
+    local confirm; read_line confirm "  ${YELLOW}Текущая конфигурация будет перезаписана. Продолжить? [y/N]:${NC} "
     [[ "$confirm" =~ ^[yY] ]] || { log_info "Отменено"; return 0; }
 
     # Работал ли прокси ДО восстановления — спрашиваем сейчас, пока настройки
@@ -71,6 +72,13 @@ restore_backup() {
     load_settings
     load_secrets
     load_nft_settings 2>/dev/null
+    if [ -n "${BLOCKLIST_COUNTRIES:-}" ]; then
+        geoblock_remove_all >/dev/null 2>&1 || true
+        geoblock_reapply_all >/dev/null 2>&1 || true
+        geoblock_install_service >/dev/null 2>&1 || true
+    else
+        geoblock_remove_service >/dev/null 2>&1 || true
+    fi
 
     # Бэкап мог приехать с другим носителем движка. Прежний остался бы держать
     # порт, и восстановленный движок не поднялся бы.
@@ -83,23 +91,52 @@ restore_backup() {
     echo ""
     echo -e "  ${BOLD}Восстановленные параметры:${NC}"
     [ "${MTPROXYL_MODE:-manager}" = "manager" ] && echo -e "    Движок: $(engine_backend_title)"
+    echo -e "    Транспорт: $(proxy_transport_mode_title)"
     echo -e "    Порт:   ${PROXY_PORT}"
     echo -e "    Домен:  ${PROXY_DOMAIN}"
     echo -e "    Секретов: ${#SECRETS_LABELS[@]}"
     echo ""
 
-    # Предложение перезапуска
-    if [ "$_was_running" = "true" ] || is_proxy_running; then
-        echo -en "  ${BOLD}Перезапустить прокси для применения? [Y/n]:${NC} "
+    # WEB после восстановления заново применяет listener'ы и свой frontend.
+    # Внешний HAProxy при этом не изменяется.
+    if [ "$_was_running" = "true" ] || is_proxy_running || web_is_enabled 2>/dev/null; then
+        if web_is_enabled 2>/dev/null; then
+            echo -en "  ${BOLD}Применить WEB-конфиг и запустить прокси? [Y/n]:${NC} "
+        else
+            echo -en "  ${BOLD}Перезапустить прокси для применения? [Y/n]:${NC} "
+        fi
         local yn; read_line yn
         if [[ ! "$yn" =~ ^[nN] ]]; then
-            restart_proxy_container || true
+            _backup_apply_restored_runtime || true
         else
-            log_info "Выполните 'mtproxyl restart' для применения"
+            if web_is_enabled 2>/dev/null; then
+                log_info "Выполните 'mtproxyl web enable' для применения"
+            else
+                log_info "Выполните 'mtproxyl restart' для применения"
+            fi
         fi
     else
         log_info "Прокси не запущен. Выполните 'mtproxyl start' для запуска с новыми настройками"
     fi
+}
+
+_backup_apply_restored_runtime() {
+    if web_is_enabled 2>/dev/null; then
+        web_enable || return 1
+        if web_is_only_mode; then
+            _web_suspend_mtproto_fixes
+        else
+            _web_resume_mtproto_fixes
+        fi
+        return 0
+    fi
+
+    if [ "${SELFMASK_ENABLED:-false}" = "true" ]; then
+        _selfmask_configure_nginx || return 1
+    else
+        systemctl stop "${SELFMASK_PQ_SERVICE}" >/dev/null 2>&1 || true
+    fi
+    restart_proxy_container
 }
 
 list_backups() {
@@ -208,9 +245,13 @@ migrate_export() {
     local out="${1:-/tmp/mtproxyl-migrate-$(date +%Y%m%d-%H%M%S).tar.gz}"
     local tmp; tmp=$(mktemp -d) || { log_error "Не удалось создать временную директорию"; return 1; }
     local count=0
-    for f in settings.conf secrets.conf upstreams.conf nft-rules.conf expert.conf tunings.conf superexpert.toml; do
+    for f in settings.conf secrets.conf upstreams.conf nft-rules.conf expert.conf tunings.conf \
+             superexpert.toml nginx-custom.conf selfmask-manager.conf selfmask-reanimator.conf; do
         [ -f "${INSTALL_DIR}/$f" ] && { cp "${INSTALL_DIR}/$f" "$tmp/" && count=$((count + 1)); }
     done
+    if [ -d "${GEOBLOCK_CACHE_DIR}" ]; then
+        cp -a "${GEOBLOCK_CACHE_DIR}" "$tmp/geoblock" && count=$((count + 1))
+    fi
     echo "v${VERSION}" > "$tmp/MIGRATE_VERSION"
     tar -czf "$out" -C "$tmp" . 2>/dev/null && log_success "Экспортировано ${count} файлов в ${out}" || { log_error "Экспорт не удался"; rm -rf "$tmp"; return 1; }
     rm -rf "$tmp"; chmod 600 "$out"
@@ -231,12 +272,25 @@ migrate_import() {
     tar -xzf "$file" -C "$tmp" 2>/dev/null || { log_error "Некорректный архив"; rm -rf "$tmp"; return 1; }
 
     local restored=0 base
-    for f in settings.conf secrets.conf upstreams.conf nft-rules.conf expert.conf tunings.conf superexpert.toml; do
+    for f in settings.conf secrets.conf upstreams.conf nft-rules.conf expert.conf tunings.conf \
+             superexpert.toml nginx-custom.conf selfmask-manager.conf selfmask-reanimator.conf; do
         [ -f "${tmp}/${f}" ] && { cp "${tmp}/${f}" "${INSTALL_DIR}/$f" && chmod 600 "${INSTALL_DIR}/$f" && restored=$((restored + 1)); }
     done
+    if [ -d "${tmp}/geoblock" ]; then
+        mkdir -p "$GEOBLOCK_CACHE_DIR"
+        cp -a "${tmp}/geoblock/." "$GEOBLOCK_CACHE_DIR/"
+        restored=$((restored + 1))
+    fi
 
     rm -rf "$tmp"
     load_settings; load_secrets
+    if [ -n "${BLOCKLIST_COUNTRIES:-}" ]; then
+        geoblock_remove_all >/dev/null 2>&1 || true
+        geoblock_reapply_all >/dev/null 2>&1 || true
+        geoblock_install_service >/dev/null 2>&1 || true
+    else
+        geoblock_remove_service >/dev/null 2>&1 || true
+    fi
     log_success "Импортировано ${restored} файлов из ${file}"
 
     if is_proxy_running; then

@@ -282,6 +282,210 @@ func (s *Server) registerMtproxylRoutes(mux *http.ServeMux, jwtSecret []byte) {
 		writeJSON(w, http.StatusOK, jsonResponse{OK: true, Data: map[string]string{"output": out}})
 	}))
 
+	mux.Handle("GET /api/mtproxyl/selfmask/nginx-config", protected(func(w http.ResponseWriter, r *http.Request) {
+		if !guard(w) {
+			return
+		}
+		content, err := client.SelfmaskNginxConfig(r.Context())
+		if err != nil {
+			writeCLIError(w, "mtproxyl_error", err)
+			return
+		}
+		writeJSON(w, http.StatusOK, jsonResponse{OK: true, Data: map[string]string{"content": content}})
+	}))
+
+	mux.Handle("PUT /api/mtproxyl/selfmask/nginx-config", protected(func(w http.ResponseWriter, r *http.Request) {
+		if !guard(w) || busy(w) {
+			return
+		}
+		var req struct {
+			Content string `json:"content"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Content == "" || len(req.Content) > 2<<20 {
+			writeError(w, http.StatusBadRequest, "invalid_config", "Конфиг должен быть размером от 1 байта до 2 МБ")
+			return
+		}
+		out, err := client.WriteSelfmaskNginxConfig(r.Context(), req.Content)
+		if err != nil {
+			writeCLIError(w, "mtproxyl_error", err)
+			return
+		}
+		writeJSON(w, http.StatusOK, jsonResponse{OK: true, Data: map[string]string{"output": out}})
+	}))
+
+	mux.Handle("POST /api/mtproxyl/selfmask/nginx-config/toggle", protected(func(w http.ResponseWriter, r *http.Request) {
+		if !guard(w) {
+			return
+		}
+		var req struct {
+			Enabled *bool `json:"enabled"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Enabled == nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", "Укажите состояние режима")
+			return
+		}
+		enabled := *req.Enabled
+		name := "selfmask:nginx-custom-off"
+		if enabled {
+			name = "selfmask:nginx-custom-on"
+		}
+		started := runner.Start(name, func(ctx context.Context) (string, error) {
+			return client.SetSelfmaskNginxCustom(ctx, enabled)
+		})
+		if !started {
+			writeError(w, http.StatusConflict, "operation_busy", "Другая операция MTProxyL уже выполняется")
+			return
+		}
+		writeJSON(w, http.StatusAccepted, jsonResponse{OK: true, Data: runner.Status()})
+	}))
+
+	mux.Handle("POST /api/mtproxyl/selfmask/nginx-config/test", protected(func(w http.ResponseWriter, r *http.Request) {
+		if !guard(w) || busy(w) {
+			return
+		}
+		out, err := client.TestSelfmaskNginxConfig(r.Context())
+		if err != nil {
+			writeCLIError(w, "mtproxyl_error", err)
+			return
+		}
+		writeJSON(w, http.StatusOK, jsonResponse{OK: true, Data: map[string]string{"output": out}})
+	}))
+
+	// ── WEB Proxy ───────────────────────────────────────────────────────────
+	mux.Handle("GET /api/mtproxyl/web", protected(func(w http.ResponseWriter, r *http.Request) {
+		if !guard(w) {
+			return
+		}
+		st, err := client.WebStatus(r.Context())
+		if err != nil {
+			writeCLIError(w, "mtproxyl_error", err)
+			return
+		}
+		writeJSON(w, http.StatusOK, jsonResponse{OK: true, Data: st})
+	}))
+
+	mux.Handle("GET /api/mtproxyl/web/params", protected(func(w http.ResponseWriter, r *http.Request) {
+		if !guard(w) {
+			return
+		}
+		list, err := client.WebParams(r.Context())
+		if err != nil {
+			writeCLIError(w, "mtproxyl_error", err)
+			return
+		}
+		writeJSON(w, http.StatusOK, jsonResponse{OK: true, Data: list})
+	}))
+
+	mux.Handle("POST /api/mtproxyl/web/params", protected(func(w http.ResponseWriter, r *http.Request) {
+		if !guard(w) || busy(w) {
+			return
+		}
+		var req struct {
+			Key   string `json:"key"`
+			Value string `json:"value"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", "Некорректное тело запроса")
+			return
+		}
+		if err := mtproxylctl.ValidateWebParam(req.Key, req.Value); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_param", "Недопустимый параметр или значение")
+			return
+		}
+		out, err := client.WebSet(r.Context(), req.Key, req.Value)
+		if err != nil {
+			writeCLIError(w, "mtproxyl_error", err)
+			return
+		}
+		writeJSON(w, http.StatusOK, jsonResponse{OK: true, Data: map[string]string{"output": out}})
+	}))
+
+	// Включение переносит listener'ы и может перевыпустить сертификат — это
+	// минуты, поэтому асинхронно, как переключение режима.
+	mux.Handle("POST /api/mtproxyl/web/enable", protected(func(w http.ResponseWriter, r *http.Request) {
+		if !guard(w) || busy(w) {
+			return
+		}
+		if !runner.Start("web:enable", client.WebEnable) {
+			writeError(w, http.StatusConflict, "operation_busy",
+				"Другая операция MTProxyL уже выполняется")
+			return
+		}
+		writeJSON(w, http.StatusAccepted, jsonResponse{OK: true, Data: runner.Status()})
+	}))
+
+	mux.Handle("POST /api/mtproxyl/web/disable", protected(func(w http.ResponseWriter, r *http.Request) {
+		if !guard(w) || busy(w) {
+			return
+		}
+		if !runner.Start("web:disable", client.WebDisable) {
+			writeError(w, http.StatusConflict, "operation_busy",
+				"Другая операция MTProxyL уже выполняется")
+			return
+		}
+		writeJSON(w, http.StatusAccepted, jsonResponse{OK: true, Data: runner.Status()})
+	}))
+
+	mux.Handle("POST /api/mtproxyl/web/mode", protected(func(w http.ResponseWriter, r *http.Request) {
+		if !guard(w) || busy(w) {
+			return
+		}
+		var req struct {
+			Mode string `json:"mode"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", "Некорректный JSON")
+			return
+		}
+		if req.Mode != "web" && req.Mode != "combined" {
+			writeError(w, http.StatusBadRequest, "invalid_mode", "Режим: web или combined")
+			return
+		}
+		if !runner.Start("web:mode:"+req.Mode, func(ctx context.Context) (string, error) {
+			return client.WebMode(ctx, req.Mode)
+		}) {
+			writeError(w, http.StatusConflict, "operation_busy", "Другая операция MTProxyL уже выполняется")
+			return
+		}
+		writeJSON(w, http.StatusAccepted, jsonResponse{OK: true, Data: runner.Status()})
+	}))
+
+	mux.Handle("POST /api/mtproxyl/web/sync", protected(func(w http.ResponseWriter, r *http.Request) {
+		if !guard(w) {
+			return
+		}
+		out, err := client.WebSync(r.Context())
+		if err != nil {
+			writeCLIError(w, "mtproxyl_error", err)
+			return
+		}
+		writeJSON(w, http.StatusOK, jsonResponse{OK: true, Data: map[string]string{"output": out}})
+	}))
+
+	mux.Handle("GET /api/mtproxyl/web/links", protected(func(w http.ResponseWriter, r *http.Request) {
+		if !guard(w) {
+			return
+		}
+		out, err := client.WebLinks(r.Context())
+		if err != nil {
+			writeCLIError(w, "mtproxyl_error", err)
+			return
+		}
+		writeJSON(w, http.StatusOK, jsonResponse{OK: true, Data: map[string]string{"output": out}})
+	}))
+
+	mux.Handle("GET /api/mtproxyl/web/haproxy-config", protected(func(w http.ResponseWriter, r *http.Request) {
+		if !guard(w) {
+			return
+		}
+		out, err := client.WebHAProxyConfig(r.Context())
+		if err != nil {
+			writeCLIError(w, "mtproxyl_error", err)
+			return
+		}
+		writeJSON(w, http.StatusOK, jsonResponse{OK: true, Data: map[string]string{"output": out}})
+	}))
+
 	// ── Настройки MTProxyL ──────────────────────────────────────────────────
 	// Живут в settings.conf, а не в конфиге движка: в Manager тот примонтирован
 	// только для чтения.
@@ -899,6 +1103,48 @@ func (s *Server) registerMtproxylRoutes(mux *http.ServeMux, jwtSecret []byte) {
 		code := req.Country
 		started := runner.Start("geoblock:add:"+code, func(ctx context.Context) (string, error) {
 			return client.GeoblockAdd(ctx, code)
+		})
+		if !started {
+			writeError(w, http.StatusConflict, "operation_busy",
+				"Другая операция MTProxyL уже выполняется")
+			return
+		}
+		writeJSON(w, http.StatusAccepted, jsonResponse{OK: true, Data: runner.Status()})
+	}))
+
+	mux.Handle("PUT /api/mtproxyl/geoblock/mode", protected(func(w http.ResponseWriter, r *http.Request) {
+		if !guard(w) || busy(w) {
+			return
+		}
+		var req struct {
+			Mode string `json:"mode"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", "Некорректное тело запроса")
+			return
+		}
+		if err := mtproxylctl.ValidateGeoblockMode(req.Mode); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_mode", "Режим: blacklist или whitelist")
+			return
+		}
+		mode := req.Mode
+		started := runner.Start("geoblock:mode:"+mode, func(ctx context.Context) (string, error) {
+			return client.GeoblockSetMode(ctx, mode)
+		})
+		if !started {
+			writeError(w, http.StatusConflict, "operation_busy",
+				"Другая операция MTProxyL уже выполняется")
+			return
+		}
+		writeJSON(w, http.StatusAccepted, jsonResponse{OK: true, Data: runner.Status()})
+	}))
+
+	mux.Handle("POST /api/mtproxyl/geoblock/reapply", protected(func(w http.ResponseWriter, r *http.Request) {
+		if !guard(w) || busy(w) {
+			return
+		}
+		started := runner.Start("geoblock:reapply", func(ctx context.Context) (string, error) {
+			return client.GeoblockReapply(ctx)
 		})
 		if !started {
 			writeError(w, http.StatusConflict, "operation_busy",

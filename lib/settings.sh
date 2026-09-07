@@ -8,6 +8,9 @@ MTPROXYL_MODE="manager"
 ENGINE_BACKEND="docker"
 ENGINE_VERSION=""
 PROXY_PORT=443
+# Какие клиентские транспорты поднимает менеджер: обычный MTProto, WEB или оба.
+# Для старых settings.conf значение выводится из WEB_ENABLED при загрузке.
+PROXY_MODE="mtproto"
 PROXY_METRICS_PORT=9090
 # REST API движка. MTProxyL включает его явно и вешает на localhost:
 # у telemt по умолчанию listen = "0.0.0.0:9091", то есть без явной
@@ -77,6 +80,7 @@ WARP_DISABLED_UPSTREAMS=""
 # Режим супер эксперта: конфиг движка ведёт пользователь вручную,
 # менеджер только копирует его файл на место config.toml
 SUPEREXPERT_ENABLED="false"
+NGINX_CUSTOM_ENABLED="false"
 
 # Selfmask (локальный nginx + Let's Encrypt либо самоподписанный сертификат)
 SELFMASK_ENABLED="false"
@@ -89,6 +93,30 @@ SELFMASK_NGINX_SITE_NAME="mtproxyl-selfmask"
 SELFMASK_AUTO_RENEW="true"
 SELFMASK_TLS_PROTOCOLS="TLSv1.3"
 SELFMASK_CERT_MODE="letsencrypt"  # letsencrypt|selfsigned
+
+# WEB Proxy (движок 3.5.1+). Публичный TLS держит nginx MTProxyL либо внешний
+# HAProxy. Домен и сайт по умолчанию берутся у Selfmask.
+WEB_ENABLED="false"
+WEB_FRONTEND="nginx"       # nginx|haproxy, кто держит публичный TLS endpoint
+# shared — WEB и FakeTLS на одном публичном порту, nginx разводит их по SNI.
+# split — у WEB свой порт, движок остаётся на PROXY_PORT напрямую; тогда
+# ssl_preread не нужен, а zapret2 и лимитер фильтруются по порту прокси.
+WEB_LAYOUT="shared"
+WEB_PUBLIC_PORT="443"       # публичный порт встроенного nginx
+WEB_DOMAIN=""
+WEB_CARRIER="websocket"        # https|https-lanes|websocket|websocket-lanes
+WEB_SECRET_MODE="dd"        # plain|dd, ee движок в WEB не поддерживает
+WEB_LISTEN_PORT="15080"     # приватный listener telemt, transport = "web"
+WEB_TLS_PORT="15444"        # приватный TLS frontend shared
+WEB_MTPROXY_PORT="15443"    # куда nginx отдаёт FakeTLS после разбора SNI
+WEB_HAPROXY_CERT=""          # PEM с сертификатом и ключом для готового фрагмента
+WEB_DECOY_MODE="empty"              # empty|static_directory|http_upstream
+WEB_DECOY_DIR=""
+WEB_DECOY_UPSTREAM=""
+WEB_DEBUG="false"           # [web.debug].enabled, страница /web-status
+WEB_FP_SEED=""              # своя строка на установку: из неё берётся CSP заглушки
+WEB_ONLY_PREV_NFT="false"
+WEB_ONLY_PREV_ZAPRET2="false"
 
 # Снимок того, что было до включения Selfmask — иначе отключение не может
 # вернуть прежний fake SNI. Файл per-mode: один набор имён на оба режима.
@@ -134,6 +162,7 @@ ENGINE_BACKEND='${ENGINE_BACKEND}'
 ENGINE_VERSION='${ENGINE_VERSION}'
 
 # Конфигурация прокси
+PROXY_MODE='${PROXY_MODE}'
 PROXY_PORT='${PROXY_PORT}'
 PROXY_METRICS_PORT='${PROXY_METRICS_PORT}'
 PROXY_API_PORT='${PROXY_API_PORT}'
@@ -209,8 +238,31 @@ SELFMASK_AUTO_RENEW='${SELFMASK_AUTO_RENEW}'
 SELFMASK_TLS_PROTOCOLS='${SELFMASK_TLS_PROTOCOLS}'
 SELFMASK_CERT_MODE='${SELFMASK_CERT_MODE}'
 
+# WEB Proxy
+WEB_ENABLED='${WEB_ENABLED}'
+WEB_FRONTEND='${WEB_FRONTEND}'
+WEB_LAYOUT='${WEB_LAYOUT}'
+WEB_PUBLIC_PORT='${WEB_PUBLIC_PORT}'
+WEB_DOMAIN='${WEB_DOMAIN}'
+WEB_CARRIER='${WEB_CARRIER}'
+WEB_SECRET_MODE='${WEB_SECRET_MODE}'
+WEB_LISTEN_PORT='${WEB_LISTEN_PORT}'
+WEB_TLS_PORT='${WEB_TLS_PORT}'
+WEB_MTPROXY_PORT='${WEB_MTPROXY_PORT}'
+WEB_HAPROXY_CERT='${WEB_HAPROXY_CERT}'
+WEB_DECOY_MODE='${WEB_DECOY_MODE}'
+WEB_DECOY_DIR='${WEB_DECOY_DIR}'
+WEB_DECOY_UPSTREAM='${WEB_DECOY_UPSTREAM}'
+WEB_DEBUG='${WEB_DEBUG}'
+WEB_FP_SEED='${WEB_FP_SEED}'
+WEB_ONLY_PREV_NFT='${WEB_ONLY_PREV_NFT}'
+WEB_ONLY_PREV_ZAPRET2='${WEB_ONLY_PREV_ZAPRET2}'
+
 # Режим супер эксперта
 SUPEREXPERT_ENABLED='${SUPEREXPERT_ENABLED}'
+
+# Пользовательский конфиг nginx
+NGINX_CUSTOM_ENABLED='${NGINX_CUSTOM_ENABLED}'
 
 # Порты, запомненные за режимами
 PORT_PROFILE_MANAGER='${PORT_PROFILE_MANAGER}'
@@ -370,6 +422,7 @@ _fix_settings_perms() {
 }
 
 load_settings() {
+    local _proxy_mode_loaded="false"
     # Отсутствие settings.conf раньше означало выход сразу, вместе с ним
     # пропускался load_selfmask_settings — и 'selfmask set' затирал значения.
     if [ -f "$SETTINGS_FILE" ]; then
@@ -389,7 +442,7 @@ load_settings() {
 
             case "$key" in
                 MTPROXYL_MODE|ENGINE_BACKEND|ENGINE_VERSION|\
-                PROXY_PORT|PROXY_METRICS_PORT|PROXY_API_PORT|PROXY_DOMAIN|PROXY_CONCURRENCY|\
+                PROXY_MODE|PROXY_PORT|PROXY_METRICS_PORT|PROXY_API_PORT|PROXY_DOMAIN|PROXY_CONCURRENCY|\
                 PROXY_CPUS|PROXY_MEMORY|CUSTOM_IP|FAKE_CERT_LEN|\
                 PROXY_PROTOCOL|PROXY_PROTOCOL_TRUSTED_CIDRS|\
                 AD_TAG|GEOBLOCK_MODE|BLOCKLIST_COUNTRIES|\
@@ -406,10 +459,16 @@ load_settings() {
                 SELFMASK_ENABLED|SELFMASK_DOMAIN|SELFMASK_SITE_SOURCE|SELFMASK_SITE_DIR|\
                 SELFMASK_NGINX_BACKEND_PORT|SELFMASK_CERT_EMAIL|SELFMASK_NGINX_SITE_NAME|\
                 SELFMASK_AUTO_RENEW|SELFMASK_TLS_PROTOCOLS|SELFMASK_CERT_MODE|\
-                SUPEREXPERT_ENABLED|\
+                WEB_ENABLED|WEB_FRONTEND|WEB_LAYOUT|WEB_PUBLIC_PORT|WEB_DOMAIN|WEB_CARRIER|WEB_SECRET_MODE|\
+                WEB_LISTEN_PORT|WEB_TLS_PORT|WEB_MTPROXY_PORT|\
+                WEB_HAPROXY_CERT|\
+                WEB_DECOY_MODE|WEB_DECOY_DIR|WEB_DECOY_UPSTREAM|WEB_DEBUG|WEB_FP_SEED|\
+                WEB_ONLY_PREV_NFT|WEB_ONLY_PREV_ZAPRET2|\
+                SUPEREXPERT_ENABLED|NGINX_CUSTOM_ENABLED|\
                 IPBLOCK_ENABLED|IPBLOCK_ACTION|IPBLOCK_LIST|IPBLOCK_LIST6|\
                 PORT_PROFILE_MANAGER|PORT_PROFILE_REANIMATOR)
                     printf -v "$key" '%s' "$val"
+                    [ "$key" = "PROXY_MODE" ] && _proxy_mode_loaded="true"
                     ;;
             esac
         done < "$SETTINGS_FILE"
@@ -452,7 +511,45 @@ load_settings() {
         *) SELFMASK_CERT_MODE="letsencrypt" ;;
     esac
 
+    [ "$WEB_ENABLED" = "true" ] || WEB_ENABLED="false"
+    if [ "${_proxy_mode_loaded:-false}" != "true" ]; then
+        [ "$WEB_ENABLED" = "true" ] && PROXY_MODE="combined" || PROXY_MODE="mtproto"
+    fi
+    case "$PROXY_MODE" in
+        mtproto)  WEB_ENABLED="false" ;;
+        web)      WEB_ENABLED="true" ;;
+        combined) WEB_ENABLED="true" ;;
+        *)        PROXY_MODE="$([ "$WEB_ENABLED" = "true" ] && echo combined || echo mtproto)" ;;
+    esac
+    case "$WEB_LAYOUT" in
+        shared|split) ;;
+        *) WEB_LAYOUT="shared" ;;
+    esac
+    case "$WEB_FRONTEND" in
+        nginx|haproxy|haproxy-nginx) ;;
+        *) WEB_FRONTEND="nginx" ;;
+    esac
+    [[ "$WEB_PUBLIC_PORT" =~ ^[0-9]+$ ]] && [ "$WEB_PUBLIC_PORT" -ge 1 ] && [ "$WEB_PUBLIC_PORT" -le 65535 ] || WEB_PUBLIC_PORT="443"
+    [ "$WEB_DEBUG" = "true" ] || WEB_DEBUG="false"
+    case "$WEB_CARRIER" in
+        https|https-lanes|websocket|websocket-lanes) ;;
+        *) WEB_CARRIER="websocket" ;;
+    esac
+    # ee движок в WEB не принимает — только plain и dd.
+    case "$WEB_SECRET_MODE" in
+        plain|dd) ;;
+        *) WEB_SECRET_MODE="dd" ;;
+    esac
+    case "$WEB_DECOY_MODE" in
+        empty|static_directory|http_upstream) ;;
+        *) WEB_DECOY_MODE="empty" ;;
+    esac
+    [[ "$WEB_LISTEN_PORT" =~ ^[0-9]+$ ]] && [ "$WEB_LISTEN_PORT" -ge 1 ] && [ "$WEB_LISTEN_PORT" -le 65535 ] || WEB_LISTEN_PORT="15080"
+    [[ "$WEB_TLS_PORT" =~ ^[0-9]+$ ]] && [ "$WEB_TLS_PORT" -ge 1 ] && [ "$WEB_TLS_PORT" -le 65535 ] || WEB_TLS_PORT="15444"
+    [[ "$WEB_MTPROXY_PORT" =~ ^[0-9]+$ ]] && [ "$WEB_MTPROXY_PORT" -ge 1 ] && [ "$WEB_MTPROXY_PORT" -le 65535 ] || WEB_MTPROXY_PORT="15443"
+
     [ "$SUPEREXPERT_ENABLED" = "true" ] || SUPEREXPERT_ENABLED="false"
+    [ "$NGINX_CUSTOM_ENABLED" = "true" ] || NGINX_CUSTOM_ENABLED="false"
     [[ "$IP_HISTORY_INTERVAL" =~ ^[0-9]+$ ]] || IP_HISTORY_INTERVAL="5"
 
     [ "$AVAILABILITY_ENABLED" = "false" ] || AVAILABILITY_ENABLED="true"

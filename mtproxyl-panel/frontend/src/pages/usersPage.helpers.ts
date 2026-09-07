@@ -56,7 +56,10 @@ function getServer(raw: string): string {
   }
 }
 
-export function buildProxyLinks(links: UserLinks | undefined): ProxyLinkGroup[] {
+export function buildProxyLinks(
+  links: UserLinks | undefined,
+  web?: WebLinkConfig,
+): ProxyLinkGroup[] {
   if (!links) return [];
 
   const result: ProxyLinkGroup[] = [];
@@ -72,17 +75,47 @@ export function buildProxyLinks(links: UserLinks | undefined): ProxyLinkGroup[] 
     if (groupLinks.length > 0) result.push({ label, links: groupLinks });
   };
 
-  if (links.tls?.length) {
+  if (web?.mtproto_enabled !== false && links.tls?.length) {
     const maskByLink = new Map((links.tls_domains ?? []).map((d) => [d.link, d.domain]));
     const tls = links.tls
       .map((url) => makeLink(url, maskByLink.get(url) ?? getServer(url), !maskByLink.has(url)))
       .sort((a, b) => Number(b.isDefault) - Number(a.isDefault));
     addGroup('TLS', tls);
   }
-  addGroup('Secure', (links.secure ?? []).map((url) => makeLink(url, getServer(url), true)));
-  addGroup('Classic', (links.classic ?? []).map((url) => makeLink(url, getServer(url), true)));
+  if (web?.mtproto_enabled !== false) {
+    addGroup('Secure', (links.secure ?? []).map((url) => makeLink(url, getServer(url), true)));
+    addGroup('Classic', (links.classic ?? []).map((url) => makeLink(url, getServer(url), true)));
+  }
+
+  // WEB движок в links не отдаёт: у него нет ресурса /v1/web, а user links
+  // покрывают только classic, secure и tls. Собираем сами из секрета.
+  const webUrl = buildWebLink(links, web);
+  if (webUrl) addGroup('WEB', [makeLink(webUrl, getServer(webUrl), true)]);
 
   return result;
+}
+
+/** Что нужно от статуса WEB, чтобы собрать ссылку пользователя. */
+export interface WebLinkConfig {
+  enabled: boolean;
+  domain: string;
+  secret_mode: string;
+  mtproto_enabled?: boolean;
+}
+
+/**
+ * tg://webproxy для пользователя. Порта в ней нет — клиент ходит
+ * только на 443, а секрет идёт голым либо с префиксом dd: ee в WEB не бывает.
+ */
+export function buildWebLink(
+  links: UserLinks | undefined,
+  web: WebLinkConfig | undefined,
+): string | undefined {
+  if (!web?.enabled || !web.domain) return undefined;
+  const raw = extractSecret(links);
+  if (!raw) return undefined;
+  const prefix = web.secret_mode === 'dd' ? 'dd' : '';
+  return `tg://webproxy?server=${web.domain}&secret=${prefix}${raw}`;
 }
 
 /**
@@ -93,7 +126,7 @@ export function buildProxyLinks(links: UserLinks | undefined): ProxyLinkGroup[] 
  * или secure: там секрет лежит без обвеса.
  */
 export function extractSecret(links: UserLinks | undefined): string | undefined {
-  const raw = links?.classic?.[0] ?? links?.secure?.[0];
+  const raw = links?.classic?.[0] ?? links?.secure?.[0] ?? links?.tls?.[0];
   if (!raw) return undefined;
   const secret = (() => {
     try {
@@ -102,7 +135,9 @@ export function extractSecret(links: UserLinks | undefined): string | undefined 
       return raw.match(/[?&]secret=([^&]*)/)?.[1] ?? '';
     }
   })();
-  // secure-ссылки несут тот же секрет с префиксом dd — для показа он лишний.
-  const bare = secret.replace(/^dd/, '');
+  // secure несёт тот же секрет с префиксом dd, ee-ссылка — с префиксом ee и
+  // доменом в hex на хвосте. Для показа нужен только сам секрет.
+  let bare = secret.replace(/^dd/, '');
+  if (/^ee[0-9a-fA-F]{32}/.test(secret)) bare = secret.slice(2, 34);
   return /^[0-9a-fA-F]{32}$/.test(bare) ? bare : undefined;
 }

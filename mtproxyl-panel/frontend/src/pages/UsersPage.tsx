@@ -11,7 +11,7 @@ import {
   Table, TableHeader, TableBody, TableRow, TableHead, TableCell,
 } from '@/components/ui/table';
 import { usePolling } from '@/hooks/usePolling';
-import { telemt, panelApi, ApiError, mtproxylUsersApi } from '@/lib/api';
+import { telemt, panelApi, ApiError, mtproxylUsersApi, mtproxylApi } from '@/lib/api';
 import { useMtproxyl } from '@/hooks/useMtproxyl';
 import { Link } from 'react-router-dom';
 import { Plus, Pencil, Trash2, ArrowUp, ArrowDown, ArrowUpDown, Search, ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react';
@@ -85,6 +85,9 @@ export function UsersPage() {
   // трафик и историю IP MTProxyL хранит отдельно и отдаёт по тому же label —
   // мержим, а не показываем как ещё одну независимую таблицу.
   const { data: mtproxylUsers } = usePolling(() => mtproxylUsersApi.list(), 10000);
+  // Статус WEB нужен, чтобы дособрать tg://webproxy: движок такие ссылки не
+  // отдаёт. Опрашиваем редко — он меняется вручную.
+  const { data: webStatus } = usePolling(() => mtproxylApi.web(), 60000);
   const mergedUsers = useMemo(() => mergeUserStats(users ?? [], mtproxylUsers), [users, mtproxylUsers]);
   const { quotaByUser, supported: quotaSupported, refresh: refreshQuota } = useQuota(10000);
 
@@ -190,15 +193,28 @@ export function UsersPage() {
       .catch((e) => console.warn('Failed to load user defaults:', e));
   }, []);
 
+  // Движок профиль WEB не заводит и не снимает: пользователь, созданный через
+  // его /v1/users, остаётся без WEB-ссылки, а профиль удалённого делает конфиг
+  // невалидным. Сводит их MTProxyL — там, где пользователей ведём не мы.
+  const syncWebProfiles = useCallback(async () => {
+    if (!mtproxylEnabled || !webStatus?.enabled) return;
+    try {
+      await mtproxylApi.webSync();
+    } catch {
+      // Не критично: ссылка появится после `mtproxyl web sync` вручную.
+    }
+  }, [mtproxylEnabled, webStatus?.enabled]);
+
   const handleCreate = useCallback(async (data: Record<string, unknown>) => {
     if (usersOwnedByMtproxyl) {
       await mtproxylUsersApi.create(String(data.username), data.secret ? String(data.secret) : undefined);
       await applyMtproxylLimits(String(data.username), data);
     } else {
       await telemt.post('/v1/users', data);
+      await syncWebProfiles();
     }
     refresh();
-  }, [refresh, usersOwnedByMtproxyl]);
+  }, [refresh, usersOwnedByMtproxyl, syncWebProfiles]);
 
   const handleEdit = useCallback(async (data: Record<string, unknown>) => {
     if (!editUser) return;
@@ -224,6 +240,7 @@ export function UsersPage() {
         await mtproxylUsersApi.remove(deleteUser);
       } else {
         await telemt.delete(`/v1/users/${deleteUser}`);
+        await syncWebProfiles();
       }
       setDeleteUser(null);
       refresh();
@@ -232,7 +249,7 @@ export function UsersPage() {
     } finally {
       setDeleting(false);
     }
-  }, [deleteUser, refresh, usersOwnedByMtproxyl]);
+  }, [deleteUser, refresh, usersOwnedByMtproxyl, syncWebProfiles]);
 
   const handleResetQuota = useCallback(async () => {
     if (!resetUser) return;
@@ -402,7 +419,7 @@ export function UsersPage() {
                           <Link to={`/users/${u.username}`} className="text-accent hover:underline">{u.username}</Link>
                         </TableCell>
                         <TableCell>
-                          <ProxyLinkButtons links={buildProxyLinks(u.links)} />
+                          <ProxyLinkButtons links={buildProxyLinks(u.links, webStatus ?? undefined)} />
                         </TableCell>
                         <TableCell>
                           <Badge variant={u.current_connections > 0 ? 'default' : 'outline'}>
@@ -487,7 +504,7 @@ export function UsersPage() {
                   totalTraffic={u.total_octets}
                   accumulatedTraffic={u.total_bytes}
                   online={u.current_connections > 0}
-                  links={buildProxyLinks(u.links)}
+                  links={buildProxyLinks(u.links, webStatus ?? undefined)}
                   onEdit={() => setEditUser(u)}
                   onDelete={() => setDeleteUser(u.username)}
                   quotaUsed={quotaByUser.get(u.username)?.used_bytes}

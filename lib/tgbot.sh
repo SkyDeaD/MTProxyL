@@ -344,9 +344,9 @@ TimeoutStopSec=20
 
 # CapabilityBoundingSet и NoNewPrivileges не задаём: они урезали бы sudo,
 # которым бот зовёт MTProxyL — тот падает без setuid/setgid.
-PrivateTmp=true
-ProtectHome=true
-ReadWritePaths=${TGBOT_DIR}
+# ProtectHome и PrivateTmp тоже не задаём: их песочницу наследует и sudo-вызов
+# MTProxyL, а конфиг чужого прокси в реаниматоре обычно лежит в /root или
+# /home — из юнита он выглядит несуществующим.
 
 [Install]
 WantedBy=multi-user.target
@@ -441,8 +441,7 @@ _tgbot_ask_token() {
 
     local _token _try
     for _try in 1 2 3; do
-        echo -en "  ${BOLD}Токен:${NC} "
-        read_line _token
+        read_line _token "  ${BOLD}Токен:${NC} "
         _token=$(echo "$_token" | tr -d '[:space:]')
         [ -z "$_token" ] && { log_warn "Без токена бот не запустится"; return 1; }
         if ! _tgbot_validate_token "$_token"; then
@@ -490,8 +489,7 @@ _tgbot_ask_admin() {
         echo -e "  ${DIM}Автоматически не вышло. Узнать ID можно у бота @userinfobot${NC}"
         local _try
         for _try in 1 2 3; do
-            echo -en "  ${BOLD}Ваш Telegram ID:${NC} "
-            read_line _id
+            read_line _id "  ${BOLD}Ваш Telegram ID:${NC} "
             _id=$(echo "$_id" | tr -cd '0-9')
             [ -n "$_id" ] && break
             log_warn "Нужны только цифры"
@@ -750,8 +748,7 @@ tgbot_add_admin() {
 
     local _id="$1"
     if [ -z "$_id" ]; then
-        echo -en "  ${BOLD}Telegram ID нового администратора:${NC} "
-        read_line _id
+        read_line _id "  ${BOLD}Telegram ID нового администратора:${NC} "
     fi
     _id=$(echo "$_id" | tr -cd '0-9')
     [ -n "$_id" ] || { log_warn "Пусто, ничего не меняем"; return 1; }
@@ -774,8 +771,7 @@ tgbot_remove_admin() {
     if [ -z "$_id" ]; then
         echo -e "  ${BOLD}Сейчас в списке:${NC}"
         _tgbot_admins | sed 's/^/    /'
-        echo -en "  ${BOLD}Кого убрать (ID):${NC} "
-        read_line _id
+        read_line _id "  ${BOLD}Кого убрать (ID):${NC} "
     fi
     _id=$(echo "$_id" | tr -cd '0-9')
     [ -n "$_id" ] || return 1
@@ -817,6 +813,11 @@ tgbot_update_sources() {
     log_info "Обновляем права sudo бота"
     _tgbot_write_sudoers || log_warn "Права sudo обновить не удалось"
 
+    # И юнит: настройки службы тоже меняются между версиями, а ставился он
+    # один раз при установке.
+    log_info "Обновляем юнит службы бота"
+    _tgbot_write_service
+
     chown -R "$TGBOT_USER":"$TGBOT_USER" "$TGBOT_DIR" 2>/dev/null || true
     chmod 600 "$TGBOT_CONFIG" 2>/dev/null || true
 
@@ -837,8 +838,7 @@ tgbot_uninstall() {
     if [ "${1:-}" != "--yes" ]; then
         echo ""
         log_warn "Будут удалены служба, каталог ${TGBOT_DIR} и права sudo бота"
-        echo -en "  ${BOLD}Удалить телеграм-бота? (y/N):${NC} "
-        local _c; read_line _c
+        local _c; read_line _c "  ${BOLD}Удалить телеграм-бота? (y/N):${NC} "
         [[ "$_c" =~ ^[yYдД] ]] || { log_info "Отменено"; return 0; }
     fi
 

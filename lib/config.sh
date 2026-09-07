@@ -213,8 +213,7 @@ superexpert_enable() {
         echo -e "  ${DIM}Файл будет создан копией текущего рабочего конфига.${NC}"
     fi
     echo ""
-    echo -en "  ${BOLD}Включить режим супер эксперта? [y/N]:${NC} "
-    local _yn; read_line _yn
+    local _yn; read_line _yn "  ${BOLD}Включить режим супер эксперта? [y/N]:${NC} "
     [[ "$_yn" =~ ^[yY] ]] || { log_info "Отменено"; return 0; }
 
     if [ ! -f "$SUPEREXPERT_FILE" ]; then
@@ -243,8 +242,7 @@ superexpert_enable() {
     if [ "${MTPROXYL_ASSUME_YES:-}" = "1" ]; then
         return 0
     fi
-    echo -en "  ${BOLD}Открыть файл в редакторе сейчас? [Y/n]:${NC} "
-    local _e; read_line _e
+    local _e; read_line _e "  ${BOLD}Открыть файл в редакторе сейчас? [Y/n]:${NC} "
     [[ "$_e" =~ ^[nN] ]] || superexpert_edit
     return 0
 }
@@ -263,8 +261,7 @@ superexpert_disable() {
     echo -e "  ${DIM}Ваш файл ${SUPEREXPERT_FILE} не удаляется: при повторном включении${NC}"
     echo -e "  ${DIM}режима будет использован он же, а не новая копия.${NC}"
     echo ""
-    echo -en "  ${BOLD}Выключить режим супер эксперта? [y/N]:${NC} "
-    local _yn; read_line _yn
+    local _yn; read_line _yn "  ${BOLD}Выключить режим супер эксперта? [y/N]:${NC} "
     [[ "$_yn" =~ ^[yY] ]] || { log_info "Отменено"; return 0; }
 
     SUPEREXPERT_ENABLED="false"
@@ -315,8 +312,7 @@ superexpert_edit() {
 
 superexpert_offer_restart() {
     is_proxy_running || { log_info "Прокси не запущен — изменения применятся при запуске"; return 0; }
-    echo -en "  ${BOLD}Перезапустить прокси, чтобы применить? [Y/n]:${NC} "
-    local _r; read_line _r
+    local _r; read_line _r "  ${BOLD}Перезапустить прокси, чтобы применить? [Y/n]:${NC} "
     [[ "$_r" =~ ^[nN] ]] && { log_info "Позже: меню «Управление прокси» → Перезапустить"; return 0; }
     load_secrets 2>/dev/null || true
     restart_proxy_container || true
@@ -335,8 +331,7 @@ superexpert_recreate() {
         echo -e "  ${DIM}Копия старого файла останется рядом с суффиксом .bak${NC}"
     fi
     echo -e "  ${DIM}Новый файл будет собран из настроек и секретов MTProxyL.${NC}"
-    echo -en "  ${BOLD}Пересоздать? [y/N]:${NC} "
-    local _yn; read_line _yn
+    local _yn; read_line _yn "  ${BOLD}Пересоздать? [y/N]:${NC} "
     [[ "$_yn" =~ ^[yY] ]] || { log_info "Отменено"; return 0; }
 
     # Генерируем эталонный конфиг менеджера во временный файл: включённый
@@ -395,6 +390,13 @@ generate_telemt_config() {
         load_upstreams 2>/dev/null || true
     fi
 
+    # Пользователи — тем же порядком и по той же причине: команда без
+    # load_secrets (selfmask, nft, гео-блокировка) вычистила бы [access.users]
+    # целиком, а дальше по цепочке ещё и завела бы взамен одного 'default'.
+    if [ "${#SECRETS_LABELS[@]}" -eq 0 ]; then
+        load_secrets 2>/dev/null || true
+    fi
+
     # Режим супер эксперта: конфиг ведёт пользователь, мы только кладём его
     # файл на место config.toml. Ни настройки, ни секреты, ни override не
     # применяются — это и есть смысл режима.
@@ -407,6 +409,10 @@ generate_telemt_config() {
         return 0
     fi
 
+    if web_is_enabled; then
+        selfmask_prepare_web_decoy || log_warn "WEB: не удалось подготовить файлы заглушки"
+    fi
+
     local domain="${PROXY_DOMAIN:-cloudflare.com}"
     local mask_enabled="${MASKING_ENABLED:-true}"
     local mask_host="${MASKING_HOST:-$domain}"
@@ -415,6 +421,14 @@ generate_telemt_config() {
     local port="${PROXY_PORT:-443}"
     local metrics_port="${PROXY_METRICS_PORT:-9090}"
     local api_port="${PROXY_API_PORT:-9091}"
+
+    # При включённом WEB порт PROXY_PORT занимает nginx и разводит по SNI, а
+    # движок уходит на loopback. Явные listener'ы отменяют legacy-поля [server]
+    # целиком, поэтому MTProxy-listener приходится перечислять тоже.
+    local web_listeners=""
+    if web_is_enabled; then
+        web_listeners=$(web_listeners_toml)
+    fi
 
     local tmp; tmp=$(_mktemp "$CONFIG_DIR") || return 1
 
@@ -437,6 +451,7 @@ tls = true
 [general.links]
 show = [$(get_enabled_labels_quoted)]
 $(_h=$(proxy_public_host) && printf 'public_host = "%s"\n' "$_h")
+$(_lp=$(web_link_public_port) && printf 'public_port = %s\n' "$_lp")
 
 [server]
 port = ${port}
@@ -445,7 +460,7 @@ listen_addr_ipv6 = "::"
 proxy_protocol = ${PROXY_PROTOCOL:-false}
 metrics_listen = "127.0.0.1:${metrics_port}"
 metrics_whitelist = ["127.0.0.1/32", "::1/128"]
-
+${web_listeners}
 [server.api]
 enabled = true
 listen = "127.0.0.1:${api_port}"
@@ -578,6 +593,9 @@ TOML_EOF
         [ -n "${UPSTREAM_SCOPES[$i]:-}" ] && echo "scopes = \"${UPSTREAM_SCOPES[$i]}\"" >> "$tmp"
     done
 
+    # WEB Proxy — после [access.*], иначе профили разорвали бы таблицу секретов
+    web_is_enabled && web_sections_toml >> "$tmp"
+
     # Engine tunings
     if [ -f "${_TUNE_FILE:-/dev/null}" ] && [ -s "${_TUNE_FILE}" ]; then
         while IFS='|' read -r _tp _tv; do
@@ -670,8 +688,7 @@ expert_apply_now() {
 }
 
 _expert_apply_prompt() {
-    echo -en "  ${BOLD}Пересобрать конфиг и применить сейчас? [Y/n]:${NC} "
-    local _yn; read_line _yn
+    local _yn; read_line _yn "  ${BOLD}Пересобрать конфиг и применить сейчас? [Y/n]:${NC} "
     [[ "$_yn" =~ ^[nN] ]] && { log_info "Позже: mtproxyl config или меню → Режим эксперта → Пересобрать"; return 0; }
     _expert_generate_and_apply
 }

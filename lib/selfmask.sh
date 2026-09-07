@@ -4,7 +4,7 @@
 
 SELFMASK_PQ_PREFIX="/opt/mtproxyl-nginx"
 SELFMASK_PQ_SERVICE="mtproxyl-pq-nginx.service"
-SELFMASK_PQ_RELEASE_TAG="pq-nginx-1.28.3-openssl3.5.7"
+SELFMASK_PQ_RELEASE_TAG="pq-nginx-1.28.3-openssl3.5.7-r2"
 SELFMASK_PQ_NGINX_VERSION="1.28.3"
 SELFMASK_PQ_OPENSSL_VERSION="3.5.7"
 
@@ -63,18 +63,53 @@ _system_nginx_has_pq() {
     _version_ge "$_ssl" "$SELFMASK_MIN_SYSTEM_OPENSSL"
 }
 
+_nginx_bin_has_static_stream() {
+    local _bin="$1" _args
+    [ -x "$_bin" ] || command -v "$_bin" >/dev/null 2>&1 || return 1
+    _args=$("$_bin" -V 2>&1)
+    grep -q -- '--with-stream_ssl_preread_module' <<< "$_args" || return 1
+    grep -qE -- '--with-stream([[:space:]]|$)' <<< "$_args" || return 1
+    ! grep -q -- '--with-stream=dynamic' <<< "$_args"
+}
+
+_system_nginx_has_stream() {
+    local _bin; _bin=$(command -v nginx 2>/dev/null) || return 1
+    _nginx_bin_has_static_stream "$_bin"
+}
+
+_selfmask_web_needs_stream() {
+    [ "${WEB_ENABLED:-false}" = "true" ] \
+        && [ "${PROXY_MODE:-mtproto}" != "web" ] \
+        && [ "${WEB_LAYOUT:-shared}" != "split" ]
+}
+
 # Какой nginx использовать для заглушки. Системный годится при OpenSSL
 # 3.5.0+, но запускаем со своим конфигом и юнитом: в /etc/nginx чужой сайт.
 _selfmask_nginx_bin() {
-    if _system_nginx_has_pq; then
+    if _system_nginx_has_pq \
+       && { ! _selfmask_web_needs_stream || _system_nginx_has_stream; }; then
         command -v nginx
         return 0
     fi
     echo "$(_selfmask_pq_nginx_bin)"
 }
 
+_selfmask_conf_needs_stream() {
+    [ -f "$1" ] && grep -qE '^[[:space:]]*stream[[:space:]]*\{' "$1" 2>/dev/null
+}
+
+_selfmask_nginx_bin_for_conf() {
+    local _conf="$1"
+    if _selfmask_conf_needs_stream "$_conf" && ! _system_nginx_has_stream; then
+        echo "$(_selfmask_pq_nginx_bin)"
+    else
+        _selfmask_nginx_bin
+    fi
+}
+
 _selfmask_nginx_source() {
-    if _system_nginx_has_pq; then
+    if _system_nginx_has_pq \
+       && { ! _selfmask_web_needs_stream || _system_nginx_has_stream; }; then
         echo "системный nginx ($(nginx -V 2>&1 | grep -oE 'OpenSSL [0-9]+\.[0-9]+\.[0-9]+' | head -1))"
     else
         echo "nginx из состава MTProxyL (OpenSSL ${SELFMASK_PQ_OPENSSL_VERSION})"
@@ -92,8 +127,36 @@ _pq_openssl_source() {
     fi
 }
 
-_selfmask_pq_conf() {
+NGINX_CUSTOM_FILE="${INSTALL_DIR:-/opt/mtproxyl}/nginx-custom.conf"
+
+_selfmask_generated_pq_conf() {
     echo "${SELFMASK_PQ_PREFIX}/conf/nginx.conf"
+}
+
+_selfmask_custom_pq_conf() {
+    echo "$NGINX_CUSTOM_FILE"
+}
+
+nginx_custom_active() {
+    [ "${NGINX_CUSTOM_ENABLED:-false}" = "true" ] && [ -f "$NGINX_CUSTOM_FILE" ]
+}
+
+_selfmask_pq_conf() {
+    if [ "${NGINX_CUSTOM_ENABLED:-false}" = "true" ]; then
+        _selfmask_custom_pq_conf
+    else
+        _selfmask_generated_pq_conf
+    fi
+}
+
+# Без mime.types nginx отдаёт всё как text/plain, и браузер такой CSS не
+# применяет — многофайловая заглушка открывалась без стилей. Файла может не
+# оказаться в чужой сборке: тогда лучше без include, чем nginx, который не
+# стартует.
+_selfmask_nginx_mime_block() {
+    local _f="${SELFMASK_PQ_PREFIX}/conf/mime.types"
+    [ -f "$_f" ] || return 0
+    printf '    include       %s;\n    default_type  application/octet-stream;\n\n' "$_f"
 }
 
 _selfmask_template_label() {
@@ -265,7 +328,7 @@ selfmask_supported_os() {
 }
 
 selfmask_status_line() {
-    if [ "${SELFMASK_ENABLED:-false}" = "true" ]; then
+    if [ "${SELFMASK_ENABLED:-false}" = "true" ] || [ "${SELFMASK_CONFIGURE_ACTIVE:-false}" = "true" ]; then
         echo -e "${GREEN}включён${NC} (${SELFMASK_DOMAIN:-?} → 127.0.0.1:${SELFMASK_NGINX_BACKEND_PORT:-8444})"
     else
         echo -e "${DIM}выключен${NC}"
@@ -279,7 +342,7 @@ selfmask_show_status_json() {
     [ -n "${SELFMASK_DOMAIN:-}" ] && [ -f "$(_selfmask_cert_dir)/fullchain.pem" ] && _cert="true"
     systemctl is-active "${SELFMASK_PQ_SERVICE}" &>/dev/null && _nginx="true"
 
-    printf '{"enabled":%s,"domain":"%s","site_source":"%s","site_dir":"%s","backend_port":%d,"cert_mode":"%s","auto_renew":%s,"nginx_conf":"%s","nginx_conf_exists":%s,"cert_found":%s,"pq_nginx_active":%s,"pq_source":"%s","pq_available":%s,"pq_system":%s,"prev_saved":%s,"prev_domain":"%s"}\n' \
+    printf '{"enabled":%s,"domain":"%s","site_source":"%s","site_dir":"%s","backend_port":%d,"cert_mode":"%s","auto_renew":%s,"nginx_conf":"%s","nginx_conf_exists":%s,"nginx_custom_enabled":%s,"nginx_custom_active":%s,"nginx_custom_file":"%s","nginx_custom_file_exists":%s,"cert_found":%s,"pq_nginx_active":%s,"pq_source":"%s","pq_available":%s,"pq_system":%s,"prev_saved":%s,"prev_domain":"%s"}\n' \
         "$([ "${SELFMASK_ENABLED:-false}" = "true" ] && echo true || echo false)" \
         "$(json_escape "${SELFMASK_DOMAIN:-}")" \
         "$(json_escape "${SELFMASK_SITE_SOURCE:-stub}")" \
@@ -289,6 +352,10 @@ selfmask_show_status_json() {
         "$([ "${SELFMASK_AUTO_RENEW:-true}" = "true" ] && echo true || echo false)" \
         "$(json_escape "$_conf")" \
         "$([ -f "$_conf" ] && echo true || echo false)" \
+        "$([ "${NGINX_CUSTOM_ENABLED:-false}" = "true" ] && echo true || echo false)" \
+        "$(nginx_custom_active && echo true || echo false)" \
+        "$(json_escape "$NGINX_CUSTOM_FILE")" \
+        "$([ -f "$NGINX_CUSTOM_FILE" ] && echo true || echo false)" \
         "$_cert" "$_nginx" \
         "$(json_escape "$(_pq_openssl_source)")" \
         "$(_pq_openssl_bin >/dev/null 2>&1 && echo true || echo false)" \
@@ -319,6 +386,33 @@ selfmask_show_requirements() {
     echo ""
 }
 
+# При включённом WEB публичный порт держит уже не движок, а nginx: он разбирает
+# SNI и разводит FakeTLS и WEB по разным бэкендам. Старая строка про
+# «telemt :443 → mask» в этом случае описывала несуществующий путь.
+_selfmask_scheme_line() {
+    local _back="127.0.0.1:${SELFMASK_NGINX_BACKEND_PORT:-8444}"
+    # В реаниматоре WEB поднимает хозяин цели, и наши WEB_* к нему отношения
+    # не имеют: раскладку портов оттуда взять неоткуда.
+    if web_is_reanimator 2>/dev/null; then
+        local _p="${DETECTED_PORT:-${PROXY_PORT:-443}}"
+        if web_target_enabled 2>/dev/null; then
+            echo "telemt :${_p} → mask → nginx ${_back}; WEB у цели: $(web_target_host 2>/dev/null || echo '—')"
+        else
+            echo "telemt :${_p} → mask → nginx ${_back}"
+        fi
+        return 0
+    fi
+    if ! web_is_enabled 2>/dev/null; then
+        echo "telemt :${PROXY_PORT:-443} → mask → nginx ${_back}"
+        return 0
+    fi
+    if web_layout_is_split; then
+        echo "telemt :${PROXY_PORT:-443} → mask → nginx ${_back}; WEB: nginx :$(web_public_port) → telemt :${WEB_LISTEN_PORT:-15080}"
+    else
+        echo "nginx :${PROXY_PORT:-443} → по SNI: telemt :${WEB_MTPROXY_PORT:-15443} → mask → nginx ${_back}; $(web_domain 2>/dev/null) → nginx :${WEB_TLS_PORT:-15444} → telemt :${WEB_LISTEN_PORT:-15080}"
+    fi
+}
+
 selfmask_show_status() {
     echo ""
     draw_header "SELFMASK"
@@ -328,6 +422,7 @@ selfmask_show_status() {
     echo -e "  ${BOLD}Источник сайта:${NC} $(_selfmask_template_label "${SELFMASK_SITE_SOURCE:-stub}")"
     echo -e "  ${BOLD}Каталог сайта:${NC}  ${SELFMASK_SITE_DIR:-/var/www/mtproxyl-selfmask}"
     echo -e "  ${BOLD}Backend:${NC}        127.0.0.1:${SELFMASK_NGINX_BACKEND_PORT:-8444}"
+    echo -e "  ${BOLD}Схема:${NC}          $(_selfmask_scheme_line)"
     echo -e "  ${BOLD}TLS backend:${NC}    $(_selfmask_get_tls_info)"
     echo -e "  ${BOLD}Тип сертификата:${NC} ${SELFMASK_CERT_MODE:-letsencrypt}"
     [ "${SELFMASK_CERT_MODE:-letsencrypt}" = "letsencrypt" ] && echo -e "  ${BOLD}Продление cert:${NC} ${SELFMASK_AUTO_RENEW:-true}"
@@ -335,6 +430,7 @@ selfmask_show_status() {
 
     local _site_conf="$(_selfmask_pq_conf)"
     [ -f "$_site_conf" ] && echo -e "  ${BOLD}Nginx conf:${NC}     ${_site_conf}" || echo -e "  ${BOLD}Nginx conf:${NC}     ${DIM}не найден${NC}"
+    echo -e "  ${BOLD}Свой nginx conf:${NC} $(nginx_custom_status_line)"
 
     if [ -n "${SELFMASK_DOMAIN:-}" ] && [ -f "$(_selfmask_cert_dir)/fullchain.pem" ]; then
         echo -e "  ${BOLD}Сертификат:${NC}     ${GREEN}найден${NC}"
@@ -549,11 +645,15 @@ _selfmask_install_pq_nginx() {
     # Заглушке нужен nginx, проверке домена — openssl. Пакеты разные: системный
     # nginx бывает с OpenSSL 3.5+, когда CLI openssl ещё старый.
     local _need="${1:-nginx}"
+    # force — качать нашу сборку в любом случае. Нужен, когда системного nginx
+    # или уже стоящего не хватает по возможностям (например, нет stream).
+    local _force="${2:-}"
 
     # Системный nginx с OpenSSL 3.5.0+ умеет X25519MLKEM768 сам — качать свою
     # сборку незачем. Каталоги под конфиг и логи всё равно готовим: запускаем
     # его со своим конфигом, чтобы не трогать чужой /etc/nginx.
-    if [ "$_need" = "nginx" ] && _system_nginx_has_pq; then
+    if [ "$_need" = "nginx" ] && [ "$_force" != "force" ] && _system_nginx_has_pq \
+       && { ! _selfmask_web_needs_stream || _system_nginx_has_stream; }; then
         log_success "Используем $(_selfmask_nginx_source)"
         log_info "Своя сборка nginx не нужна — обновления придут из дистрибутива"
         mkdir -p /var/log/mtproxyl-nginx /var/lib/mtproxyl-nginx/{body,proxy,fastcgi} /var/lock
@@ -561,7 +661,7 @@ _selfmask_install_pq_nginx() {
         return 0
     fi
 
-    if [ -x "$(_selfmask_pq_nginx_bin)" ] && [ -x "$(_selfmask_pq_openssl_bin)" ]; then
+    if [ "$_force" != "force" ] && [ -x "$(_selfmask_pq_nginx_bin)" ] && [ -x "$(_selfmask_pq_openssl_bin)" ]; then
         local _ver
         _ver=$("$(_selfmask_pq_openssl_bin)" version 2>/dev/null | awk '{print $2}')
         log_success "PQ nginx уже установлен (OpenSSL ${_ver:-?})"
@@ -569,6 +669,15 @@ _selfmask_install_pq_nginx() {
     fi
 
     log_info "Скачивание PQ nginx (OpenSSL ${SELFMASK_PQ_OPENSSL_VERSION} + nginx ${SELFMASK_PQ_NGINX_VERSION})..."
+
+    # Свой конфиг откладываем до распаковки: она сносит префикс целиком и
+    # приносит стоковый. Копию держим вне префикса — внутри её съест rm -rf.
+    local _conf_backup="" _generated_conf
+    _generated_conf="$(_selfmask_generated_pq_conf)"
+    if [ -f "$_generated_conf" ] && grep -q 'mtproxyl' "$_generated_conf" 2>/dev/null; then
+        _conf_backup="/tmp/.mtproxyl-nginx-conf.$$"
+        cp -f "$_generated_conf" "$_conf_backup" 2>/dev/null || _conf_backup=""
+    fi
 
     local _arch
     case "$(uname -m)" in
@@ -629,9 +738,18 @@ _selfmask_install_pq_nginx() {
     local _ver
     _ver=$("$(_selfmask_pq_openssl_bin)" version 2>/dev/null | awk '{print $2}')
     log_success "PQ nginx установлен (OpenSSL ${_ver:-?})"
+
+    # Архив разворачивается поверх префикса и приносит свой conf/nginx.conf.
+    # Настроенный при этом теряется, а с ним и публичный порт — возвращаем.
+    if [ -n "$_conf_backup" ] && [ -f "$_conf_backup" ]; then
+        mv -f "$_conf_backup" "$_generated_conf" 2>/dev/null || true
+        log_info "Настроенный конфиг nginx возвращён на место"
+    fi
 }
 
 _selfmask_install_pq_service() {
+    local _conf="${1:-$(_selfmask_pq_conf)}" _nginx_bin
+    _nginx_bin="$(_selfmask_nginx_bin_for_conf "$_conf")"
     cat > "/etc/systemd/system/${SELFMASK_PQ_SERVICE}" << EOF
 [Unit]
 Description=MTProxyL PQ nginx for selfmask
@@ -640,8 +758,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStartPre=$(_selfmask_nginx_bin) -t -c $(_selfmask_pq_conf)
-ExecStart=$(_selfmask_nginx_bin) -c $(_selfmask_pq_conf) -g 'daemon off;'
+ExecStartPre=${_nginx_bin} -t -c ${_conf}
+ExecStart=${_nginx_bin} -c ${_conf} -g 'daemon off;'
 ExecReload=/bin/kill -HUP \$MAINPID
 ExecStop=/bin/kill -QUIT \$MAINPID
 Restart=on-failure
@@ -776,22 +894,24 @@ _selfmask_deploy_site() {
     log_info "Развёртывание сайта-маски..."
 
     mkdir -p "$SELFMASK_SITE_DIR"
+    rm -f "${SELFMASK_SITE_DIR}/mtproxyl-decoy.css" "${SELFMASK_SITE_DIR}/mtproxyl-decoy.js" \
+          "${SELFMASK_SITE_DIR}/mtproxyl-web-inline.css" "${SELFMASK_SITE_DIR}/mtproxyl-web-inline.js"
 
     local _src="${SELFMASK_SITE_SOURCE:-stub}"
     local _templates_base="${GITHUB_RAW}/templates_html"
 
     case "$_src" in
         stub)
-            _selfmask_download_template "${_templates_base}/stub.html" || _selfmask_fallback_stub
+            _selfmask_download_builtin_template "${_templates_base}/stub.html" || _selfmask_fallback_stub
             ;;
         filemanager)
-            _selfmask_download_template "${_templates_base}/filemanager.html" || _selfmask_fallback_stub
+            _selfmask_download_builtin_template "${_templates_base}/filemanager.html" || _selfmask_fallback_stub
             ;;
         catrunner)
-            _selfmask_download_template "${_templates_base}/catrunner.html" || _selfmask_fallback_stub
+            _selfmask_download_builtin_template "${_templates_base}/catrunner.html" || _selfmask_fallback_stub
             ;;
         mekorunner)
-            _selfmask_download_template "${_templates_base}/mekorunner.html" || _selfmask_fallback_stub
+            _selfmask_download_builtin_template "${_templates_base}/mekorunner.html" || _selfmask_fallback_stub
             ;;
         http*)
             _selfmask_download_template "$_src" || _selfmask_fallback_stub
@@ -801,8 +921,223 @@ _selfmask_deploy_site() {
             ;;
     esac
 
+    _selfmask_deploy_site_extras
+
     chown -R www-data:www-data "$SELFMASK_SITE_DIR" 2>/dev/null || true
     chmod -R 755 "$SELFMASK_SITE_DIR" 2>/dev/null || true
+}
+
+# Обычный сайт отвечает своей страницей на неизвестный путь и держит
+# robots.txt с favicon. Пустой 404 и голый nginx на этих путях выдавали
+# заглушку не хуже уникального CSP.
+_selfmask_deploy_site_extras() {
+    local _dir="${1:-$SELFMASK_SITE_DIR}" _seed _d1 _d2
+    [ -d "$_dir" ] || return 0
+    _seed=$(printf 'site%s' "$(web_fp_seed 2>/dev/null)" | md5sum 2>/dev/null | cut -c1-2)
+    _d1=$(( 16#${_seed:0:1} )); _d2=$(( 16#${_seed:1:1} ))
+
+    if [ ! -s "${_dir}/404.html" ]; then
+        if [ -s "${_dir}/style.css" ]; then
+            cat > "${_dir}/404.html" << 'HTML_EOF'
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Страница не найдена</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <h1>Страница не найдена</h1>
+  <p>Такой страницы здесь нет. Проверьте адрес или вернитесь на <a href="/">главную</a>.</p>
+  <p class="footer">&copy; 2026</p>
+</body>
+</html>
+HTML_EOF
+        elif [ -s "${_dir}/index.html" ]; then
+            cp -f "${_dir}/index.html" "${_dir}/404.html"
+        fi
+    fi
+
+    if [ ! -e "${_dir}/robots.txt" ]; then
+        case $(( _d1 % 3 )) in
+            0) printf 'User-agent: *\nDisallow:\n' > "${_dir}/robots.txt" ;;
+            1) printf 'User-agent: *\nAllow: /\n' > "${_dir}/robots.txt" ;;
+            *) printf 'User-agent: *\nDisallow: /admin/\nDisallow: /private/\n' > "${_dir}/robots.txt" ;;
+        esac
+    fi
+
+    [ -e "${_dir}/favicon.ico" ] || _selfmask_write_favicon "${_dir}/favicon.ico" "$_d2"
+}
+
+# 16×16 однотонная иконка: заголовок ICO, BITMAPINFOHEADER, пиксели BGRA и
+# пустая AND-маска. Цвет берём из seed установки.
+_selfmask_write_favicon() {
+    local _f="$1" _n="${2:-0}" _i _r _g _b _px
+    _r=$(( 32 + (_n * 13) % 190 )); _g=$(( 48 + (_n * 29) % 170 )); _b=$(( 64 + (_n * 47) % 160 ))
+    {
+        printf '\x00\x00\x01\x00\x01\x00\x10\x10\x00\x00\x01\x00\x20\x00\x68\x04\x00\x00\x16\x00\x00\x00'
+        printf '\x28\x00\x00\x00\x10\x00\x00\x00\x20\x00\x00\x00\x01\x00\x20\x00\x00\x00\x00\x00'
+        printf '\x00\x04\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
+        _px=$(printf '\\x%02x\\x%02x\\x%02x\\xff' "$_b" "$_g" "$_r")
+        for (( _i = 0; _i < 256; _i++ )); do printf "$_px"; done
+        for (( _i = 0; _i < 64; _i++ )); do printf '\x00'; done
+    } > "$_f"
+}
+
+_selfmask_download_builtin_template() {
+    _selfmask_download_template "$1" || return 1
+    rm -f "${SELFMASK_SITE_DIR}/mtproxyl-decoy.css" "${SELFMASK_SITE_DIR}/mtproxyl-decoy.js" \
+          "${SELFMASK_SITE_DIR}/style.css" "${SELFMASK_SITE_DIR}/app.js"
+    _selfmask_externalize_inline_assets style app
+}
+
+_selfmask_externalize_tag() {
+    local _html="$1" _tag="$2" _asset="$3" _replacement="$4" _counts _tmp _asset_tmp
+
+    _counts=$(awk -v tag="$_tag" '
+        BEGIN { open_re = "<" tag "[[:space:]]*>"; close_re = "</" tag "[[:space:]]*>" }
+        {
+            line = tolower($0)
+            while (match(line, open_re)) { opens++; line = substr(line, RSTART + RLENGTH) }
+            line = tolower($0)
+            while (match(line, close_re)) { closes++; line = substr(line, RSTART + RLENGTH) }
+        }
+        END { print opens + 0 ":" closes + 0 }
+    ' "$_html") || return 1
+    [ "$_counts" = "1:1" ] || return 0
+
+    _tmp=$(_mktemp "$SELFMASK_SITE_DIR") || return 1
+    _asset_tmp=$(_mktemp "$SELFMASK_SITE_DIR") || { rm -f "$_tmp"; return 1; }
+    if ! awk -v tag="$_tag" -v asset="$_asset_tmp" -v replacement="$_replacement" '
+        BEGIN { open_re = "<" tag "[[:space:]]*>"; close_re = "</" tag "[[:space:]]*>" }
+        {
+            line = $0
+            out = ""
+            while (1) {
+                if (!inside) {
+                    if (match(tolower(line), open_re)) {
+                        out = out substr(line, 1, RSTART - 1) replacement
+                        line = substr(line, RSTART + RLENGTH)
+                        inside = 1
+                        continue
+                    }
+                    out = out line
+                    break
+                }
+                if (match(tolower(line), close_re)) {
+                    print substr(line, 1, RSTART - 1) >> asset
+                    line = substr(line, RSTART + RLENGTH)
+                    inside = 0
+                    continue
+                }
+                print line >> asset
+                break
+            }
+            print out
+        }
+        END { if (inside) exit 1 }
+    ' "$_html" > "$_tmp"; then
+        rm -f "$_tmp" "$_asset_tmp"
+        return 1
+    fi
+
+    mv "$_asset_tmp" "$_asset" || { rm -f "$_tmp" "$_asset_tmp"; return 1; }
+    mv "$_tmp" "$_html" || return 1
+}
+
+_selfmask_has_inline_assets() {
+    awk '
+        {
+            line = tolower($0)
+            if (line ~ /<style([[:space:]>])/) found = 1
+            while (match(line, /<script[^>]*>/)) {
+                tag = substr(line, RSTART, RLENGTH)
+                if (tag !~ /[[:space:]]src[[:space:]]*=/) found = 1
+                line = substr(line, RSTART + RLENGTH)
+            }
+        }
+        END { exit found ? 0 : 1 }
+    ' "$1"
+}
+
+_selfmask_externalize_inline_assets() {
+    local _style_base="${1:-style}" _script_base="${2:-app}"
+    local _html="${SELFMASK_SITE_DIR}/index.html" _tmp _legacy_login="false" _script_tag
+    [ -f "$_html" ] || return 1
+
+    if [ "${SELFMASK_SITE_SOURCE:-stub}" = "filemanager" ] \
+       && grep -q 'onsubmit="return tryLogin()"' "$_html"; then
+        _legacy_login="true"
+        _tmp=$(_mktemp "$SELFMASK_SITE_DIR") || return 1
+        awk '{gsub(/ onsubmit="return tryLogin\(\)"/, ""); print}' "$_html" > "$_tmp"
+        mv "$_tmp" "$_html"
+    fi
+
+    _selfmask_externalize_tag \
+        "$_html" style "${SELFMASK_SITE_DIR}/${_style_base}.css" \
+        "<link rel=\"stylesheet\" href=\"/${_style_base}.css\">" || return 1
+
+    _script_tag="<script src=\"/${_script_base}.js\"></script>"
+    case "${SELFMASK_SITE_SOURCE:-stub}" in
+        stub|filemanager|catrunner|mekorunner)
+            _script_tag="<script src=\"/${_script_base}.js\" defer></script>" ;;
+    esac
+    _selfmask_externalize_tag \
+        "$_html" script "${SELFMASK_SITE_DIR}/${_script_base}.js" "$_script_tag" || return 1
+
+    if [ "$_legacy_login" = "true" ] && [ -f "${SELFMASK_SITE_DIR}/${_script_base}.js" ]; then
+        cat >> "${SELFMASK_SITE_DIR}/${_script_base}.js" <<'JS_EOF'
+document.getElementById('lf').addEventListener('submit',function(e){
+  e.preventDefault();
+  tryLogin();
+});
+JS_EOF
+    fi
+
+    chmod 644 "$_html" 2>/dev/null || return 1
+    [ ! -f "${SELFMASK_SITE_DIR}/${_style_base}.css" ] || \
+        chmod 644 "${SELFMASK_SITE_DIR}/${_style_base}.css" 2>/dev/null || return 1
+    [ ! -f "${SELFMASK_SITE_DIR}/${_script_base}.js" ] || \
+        chmod 644 "${SELFMASK_SITE_DIR}/${_script_base}.js" 2>/dev/null || return 1
+}
+
+_selfmask_migrate_asset_names() {
+    local _html="${SELFMASK_SITE_DIR}/index.html" _old="$1" _style="$2" _script="$3"
+    [ -f "$_html" ] || return 0
+    if grep -q "/${_old}.css" "$_html"; then
+        [ ! -f "${SELFMASK_SITE_DIR}/${_old}.css" ] \
+            || mv -f "${SELFMASK_SITE_DIR}/${_old}.css" "${SELFMASK_SITE_DIR}/${_style}.css"
+        sed -i "s|/${_old}\\.css|/${_style}.css|g" "$_html"
+    fi
+    if grep -q "/${_old}.js" "$_html"; then
+        [ ! -f "${SELFMASK_SITE_DIR}/${_old}.js" ] \
+            || mv -f "${SELFMASK_SITE_DIR}/${_old}.js" "${SELFMASK_SITE_DIR}/${_script}.js"
+        sed -i "s|/${_old}\\.js|/${_script}.js|g" "$_html"
+    fi
+}
+
+selfmask_prepare_web_decoy() {
+    [ "${WEB_DECOY_MODE:-empty}" = "static_directory" ] || return 0
+    [ -e "${SELFMASK_SITE_DIR}/404.html" ] \
+        || install -m 0644 /dev/null "${SELFMASK_SITE_DIR}/404.html" || return 1
+    case "${SELFMASK_SITE_SOURCE:-stub}" in
+        stub|filemanager|catrunner|mekorunner)
+            _selfmask_migrate_asset_names mtproxyl-decoy style app
+            _selfmask_externalize_inline_assets style app || return 1
+            ;;
+        *)
+            _selfmask_migrate_asset_names mtproxyl-web-inline inline-style inline-script
+            _selfmask_externalize_inline_assets inline-style inline-script || return 1
+            ;;
+    esac
+    case "${SELFMASK_SITE_SOURCE:-stub}" in
+        stub|filemanager|catrunner|mekorunner) return 0 ;;
+    esac
+    if _selfmask_has_inline_assets "${SELFMASK_SITE_DIR}/index.html"; then
+        log_warn "WEB: в пользовательской заглушке остался inline CSS или JavaScript"
+        log_info "Вынесите сложные inline-блоки в отдельные локальные .css/.js файлы"
+    fi
 }
 
 _selfmask_download_template() {
@@ -819,6 +1154,8 @@ _selfmask_download_template() {
 
 _selfmask_fallback_stub() {
     log_info "Создаём встроенную заглушку..."
+    rm -f "${SELFMASK_SITE_DIR}/mtproxyl-decoy.css" "${SELFMASK_SITE_DIR}/mtproxyl-decoy.js" \
+          "${SELFMASK_SITE_DIR}/style.css" "${SELFMASK_SITE_DIR}/app.js"
     cat > "${SELFMASK_SITE_DIR}/index.html" << 'HTML_EOF'
 <!doctype html>
 <html lang="ru">
@@ -840,6 +1177,7 @@ _selfmask_fallback_stub() {
 </body>
 </html>
 HTML_EOF
+    _selfmask_externalize_inline_assets style app || return 1
     log_success "Встроенная заглушка создана"
 }
 
@@ -862,8 +1200,10 @@ _selfmask_open_public_ports() {
 
 # Годен ли лежащий сертификат: оба файла, наш домен, больше 30 дней до
 # истечения. Наличия fullchain.pem мало — просроченный файл никуда не девается.
+# Доменов может быть несколько: при включённом WEB его имя лежит в том же
+# сертификате отдельным SAN, и без него ветка WEB отдавала бы чужое имя.
 _selfmask_cert_is_valid() {
-    local _dir="$1" _domain="$2"
+    local _dir="$1"; shift
     [ -f "${_dir}/fullchain.pem" ] && [ -f "${_dir}/privkey.pem" ] || return 1
 
     # Проверить нечем — считаем годным: своей проверкой мы бы только выбросили
@@ -872,18 +1212,113 @@ _selfmask_cert_is_valid() {
 
     openssl x509 -in "${_dir}/fullchain.pem" -noout -checkend 2592000 &>/dev/null || return 1
 
+    local _sans _d
+    _sans=$(openssl x509 -in "${_dir}/fullchain.pem" -noout -text 2>/dev/null \
+        | grep -oE 'DNS:[^,[:space:]]+' | cut -d: -f2)
     # Домен сверяем по SAN точным совпадением: grep по строке с доменом принял
     # бы и чужой сертификат, где наш домен — лишь часть другого имени.
-    openssl x509 -in "${_dir}/fullchain.pem" -noout -text 2>/dev/null \
-        | grep -oE 'DNS:[^,[:space:]]+' | cut -d: -f2 | grep -Fxq "$_domain" || return 1
+    for _d in "$@"; do
+        [ -n "$_d" ] || continue
+        printf '%s\n' "$_sans" | grep -Fxq "$_d" || return 1
+    done
     return 0
+}
+
+# Под словом «лимит» у Let's Encrypt прячутся разные вещи с разными причинами и
+# разными способами обойти. Раньше мы называли один и тот же — «5 сертификатов на
+# набор доменов» — и уверяли, что с DNS всё хорошо; при упёршейся проверке домена
+# это было прямой ложью. Теперь разбираем, что именно ответил сервер, и в любом
+# случае показываем его собственный текст.
+_selfmask_explain_cert_error() {
+    local _out="$1" _retry _bucket
+
+    _retry=$(printf '%s\n' "$_out" | grep -oE 'retry after [0-9T:-]+( [0-9:]+)?( UTC)?' | head -1)
+
+    case "$_out" in
+        *"too many failed authorizations"*|*"too many failed validations"*)
+            log_error "Слишком много неудачных проверок домена подряд"
+            log_info "Это следствие, а не причина: Let's Encrypt не смог подтвердить домен"
+            log_info "и временно перестал принимать попытки. Проверьте A-запись и порт 80,"
+            log_info "иначе следующая попытка упрётся в то же самое"
+            ;;
+        *"exact set of domains"*|*"too many duplicate certificates"*)
+            log_error "Уже выдано 5 одинаковых сертификатов на этот же набор доменов за 168 часов"
+            log_info "С DNS и портом 80 всё в порядке — упёрлись именно в повторные выпуски"
+            ;;
+        *"too many certificates"*|*"too many new certificates"*)
+            # Лимит считается по регистрируемому домену, и сервер сам его называет.
+            _bucket=$(printf '%s\n' "$_out" | grep -oE 'already issued for(:| )+"?[A-Za-z0-9.*-]+' | head -1 | grep -oE '[A-Za-z0-9.*-]+$')
+            log_error "Достигнут лимит сертификатов${_bucket:+ по домену ${_bucket}}"
+            log_info "Лимит считается по регистрируемому домену, а не по вашему поддомену."
+            if [ -n "$_bucket" ] && [ "$_bucket" != "$SELFMASK_DOMAIN" ]; then
+                log_warn "Похоже, ${_bucket} — сервис чужих поддоменов: квоту расходуете не только вы"
+                log_info "Свой домен решает это насовсем, у него будет отдельная квота"
+            fi
+            ;;
+        *rateLimited*|*"rate limit"*)
+            log_error "Let's Encrypt ограничил выпуск — точную причину он назвал ниже"
+            ;;
+        *)
+            log_info "Проверьте DNS домена и доступность порта 80 извне"
+            ;;
+    esac
+
+    [ -n "$_retry" ] && log_info "Повторить можно после: ${_retry#retry after }"
+    log_info "Не дожидаясь: mtproxyl selfmask set SELFMASK_CERT_MODE selfsigned, затем selfmask apply"
+
+    # Текст сервера показываем всегда: наша расшифровка может не угадать, а он
+    # называет и лимит, и домен, по которому тот считается.
+    echo ""
+    log_info "Ответ Let's Encrypt:"
+    printf '%s\n' "$_out" | grep -iE 'error|limit|detail|problem|urn:ietf' | tail -6 | sed 's/^/    /'
+    [ -f /var/log/letsencrypt/letsencrypt.log ] && \
+        log_info "Полный лог: /var/log/letsencrypt/letsencrypt.log"
+    return 0
+}
+
+# Отдельный сертификат только на WEB-домен, своим cert-name. Нужен, когда общий
+# набор отвергнут из-за домена маскировки: у другого домена своя квота, и WEB
+# поднимется, даже пока Selfmask ждёт.
+_selfmask_obtain_web_cert() {
+    local _wd _dir
+    web_is_enabled 2>/dev/null || return 1
+    _wd=$(web_domain 2>/dev/null) || return 1
+    [ -n "$_wd" ] && [ "$_wd" != "$SELFMASK_DOMAIN" ] || return 1
+
+    _dir=$(web_own_cert_dir) || return 1
+    if _selfmask_cert_is_valid "$_dir" "$_wd"; then
+        log_success "У WEB уже есть свой сертификат на ${_wd}"
+        return 0
+    fi
+
+    log_info "Пробуем отдельный сертификат только на ${_wd}..."
+    local -a _mail2=(--register-unsafely-without-email)
+    [ -n "${SELFMASK_CERT_EMAIL:-}" ] && _mail2=(-m "$SELFMASK_CERT_EMAIL")
+
+    local _out
+    if _out=$(certbot certonly --webroot -w "$SELFMASK_SITE_DIR" \
+        -d "$_wd" --non-interactive --agree-tos \
+        "${_mail2[@]}" --cert-name "$_wd" 2>&1); then
+        log_success "Сертификат для ${_wd} получен"
+        return 0
+    fi
+    log_warn "Отдельный сертификат для ${_wd} тоже не вышел"
+    _selfmask_explain_cert_error "$_out"
+    return 1
 }
 
 _selfmask_obtain_cert() {
     log_info "Получение сертификата Let's Encrypt..."
 
     local _cert_dir; _cert_dir="$(_selfmask_cert_dir)"
-    if _selfmask_cert_is_valid "$_cert_dir" "$SELFMASK_DOMAIN"; then
+    local -a _need=("$SELFMASK_DOMAIN")
+    # Если WEB уже обзавёлся своим сертификатом, требовать его имя от общего
+    # незачем — иначе мы бы выпускали общий заново на каждом применении.
+    if web_is_enabled 2>/dev/null && ! web_has_own_cert 2>/dev/null; then
+        local _wd; _wd=$(web_domain 2>/dev/null)
+        [ -n "$_wd" ] && [ "$_wd" != "$SELFMASK_DOMAIN" ] && _need+=("$_wd")
+    fi
+    if _selfmask_cert_is_valid "$_cert_dir" "${_need[@]}"; then
         local _until
         _until=$(openssl x509 -in "${_cert_dir}/fullchain.pem" -noout -enddate 2>/dev/null | cut -d= -f2)
         log_success "Сертификат для ${SELFMASK_DOMAIN} уже есть в системе — используем его"
@@ -901,7 +1336,11 @@ _selfmask_obtain_cert() {
     mkdir -p "${SELFMASK_SITE_DIR}/.well-known/acme-challenge"
     mkdir -p "${SELFMASK_PQ_PREFIX}/conf"
 
-    cat > "$(_selfmask_pq_conf)" << EOF
+    local _mime; _mime=$(_selfmask_nginx_mime_block)
+
+    local _acme_conf
+    _acme_conf="$(_selfmask_generated_pq_conf)"
+    cat > "$_acme_conf" << EOF
 worker_processes auto;
 
 events {
@@ -909,6 +1348,9 @@ events {
 }
 
 http {
+${_mime}
+    server_tokens off;
+
     server {
         listen 80;
         server_name ${SELFMASK_DOMAIN};
@@ -928,8 +1370,8 @@ http {
 EOF
 
     _selfmask_open_public_ports
-    _selfmask_install_pq_service
-    _selfmask_free_ports || return 1
+    _selfmask_install_pq_service "$_acme_conf"
+    _selfmask_free_ports || { _selfmask_restore_custom_service || true; return 1; }
 
     mkdir -p /var/lib/mtproxyl-nginx/body
     mkdir -p /var/lib/mtproxyl-nginx/proxy
@@ -939,14 +1381,16 @@ EOF
     rm -f /run/mtproxyl-nginx.pid 2>/dev/null || true
 
     local _test_out=""
-    _test_out=$("$(_selfmask_nginx_bin)" -t -c "$(_selfmask_pq_conf)" 2>&1) || {
+    _test_out=$("$(_selfmask_nginx_bin)" -t -c "$_acme_conf" 2>&1) || {
         log_error "Ошибка временного конфига PQ nginx для ACME"
         echo "$_test_out" | sed 's/^/    /'
+        _selfmask_restore_custom_service || true
         return 1
     }
     
     systemctl restart "${SELFMASK_PQ_SERVICE}" &>/dev/null || {
         log_error "Не удалось запустить PQ nginx"
+        _selfmask_restore_custom_service || true
         return 1
     }
 
@@ -957,46 +1401,115 @@ EOF
 
     # Вывод certbot нужен целиком: без него причина отказа терялась, и любая
     # неудача выглядела как проблема с DNS или портом 80.
+    # WEB-домен идёт в тот же сертификат отдельным SAN: --cert-name не меняем,
+    # поэтому пути в конфиге nginx остаются прежними.
+    local -a _domain_args=(-d "$SELFMASK_DOMAIN")
+    if web_is_enabled 2>/dev/null; then
+        local _wd; _wd=$(web_domain 2>/dev/null)
+        [ -n "$_wd" ] && [ "$_wd" != "$SELFMASK_DOMAIN" ] && _domain_args+=(-d "$_wd")
+    fi
+
     local _cb_out
     if _cb_out=$(certbot certonly --webroot -w "$SELFMASK_SITE_DIR" \
-        -d "$SELFMASK_DOMAIN" \
+        "${_domain_args[@]}" \
         --non-interactive --agree-tos \
         "${_mail_args[@]}" \
         --cert-name "$SELFMASK_DOMAIN" 2>&1); then
         log_success "Сертификат получен"
+        _selfmask_restore_custom_service || true
+        return 0
+    fi
+
+    # Общий сертификат не вышел. Если в наборе был ещё и WEB-домен, пробуем
+    # выпустить ему отдельный: чаще всего упирается именно домен маскировки —
+    # он идёт в каждом запросе, — и тогда развязка спасает WEB целиком.
+    if [ "${#_domain_args[@]}" -gt 2 ] && _selfmask_obtain_web_cert; then
+        log_warn "Общий сертификат выпустить не удалось, но у WEB теперь свой"
+        log_info "Причина отказа по общему набору:"
+        _selfmask_explain_cert_error "$_cb_out"
+        _selfmask_restore_custom_service || true
         return 0
     fi
 
     log_error "Не удалось получить сертификат"
-    case "$_cb_out" in
-        *rateLimited*|*"too many certificates"*)
-            log_error "Let's Encrypt упёрся в лимит по этому домену — с DNS и портом 80 всё в порядке"
-            local _retry
-            _retry=$(printf '%s\n' "$_cb_out" | grep -oE 'retry after [0-9-]+ [0-9:]+ UTC' | head -1)
-            [ -n "$_retry" ] && log_info "Повторить можно после: ${_retry#retry after }"
-            log_info "Лимит — 5 сертификатов на один и тот же набор доменов за 168 часов"
-            log_info "Пока он не истёк: mtproxyl selfmask setup с самоподписанным сертификатом"
-            ;;
-        *)
-            log_info "Проверьте DNS домена и доступность порта 80 извне"
-            printf '%s\n' "$_cb_out" | tail -5 | sed 's/^/    /'
-            ;;
-    esac
+    _selfmask_explain_cert_error "$_cb_out"
+    _selfmask_restore_custom_service || true
     return 1
+}
+
+_selfmask_restore_custom_service() {
+    nginx_custom_active || return 0
+    "$(_selfmask_nginx_bin_for_conf "$NGINX_CUSTOM_FILE")" -t -c "$NGINX_CUSTOM_FILE" &>/dev/null || return 1
+    _selfmask_install_pq_service "$NGINX_CUSTOM_FILE"
+    systemctl restart "${SELFMASK_PQ_SERVICE}" &>/dev/null
+}
+
+_selfmask_activate_nginx_conf() {
+    local _conf="$1" _test_out="" _nginx_bin
+    [ -f "$_conf" ] || { log_error "Конфиг nginx не найден: ${_conf}"; return 1; }
+    _nginx_bin="$(_selfmask_nginx_bin_for_conf "$_conf")"
+    if _selfmask_conf_needs_stream "$_conf" \
+       && ! _nginx_bin_has_static_stream "$_nginx_bin"; then
+        log_info "Конфигу нужен статический stream — устанавливаем nginx из состава MTProxyL"
+        _selfmask_install_pq_nginx nginx force || return 1
+        _nginx_bin="$(_selfmask_pq_nginx_bin)"
+        _nginx_bin_has_static_stream "$_nginx_bin" || {
+            log_error "Установленный nginx не содержит статический stream"
+            return 1
+        }
+    fi
+
+    _test_out=$("$_nginx_bin" -t -c "$_conf" 2>&1) || {
+        log_error "Ошибка конфига nginx"
+        echo "$_test_out" | sed 's/^/    /'
+        return 1
+    }
+
+    _selfmask_install_pq_service "$_conf"
+    _selfmask_free_ports || { _selfmask_restore_port80_holders; return 1; }
+
+    mkdir -p /var/lib/mtproxyl-nginx/{body,proxy,fastcgi}
+    mkdir -p /var/log/mtproxyl-nginx /var/lock
+    rm -f /run/mtproxyl-nginx.pid 2>/dev/null || true
+
+    systemctl restart "${SELFMASK_PQ_SERVICE}" &>/dev/null || {
+        log_error "Не удалось перезапустить PQ nginx"
+        journalctl -u "${SELFMASK_PQ_SERVICE}" -n 20 --no-pager 2>/dev/null | sed 's/^/    /'
+        _selfmask_restore_port80_holders
+        return 1
+    }
 }
 
 _selfmask_configure_nginx() {
     log_info "Настройка PQ nginx..."
 
-    local _cert_dir; _cert_dir="$(_selfmask_cert_dir)"
+    local _cert_dir
+    if [ "${SELFMASK_ENABLED:-false}" = "true" ] || [ "${SELFMASK_CONFIGURE_ACTIVE:-false}" = "true" ]; then
+        _cert_dir="$(_selfmask_cert_dir)"
+    else
+        _cert_dir="$(web_cert_dir 2>/dev/null)"
+    fi
     [ -f "${_cert_dir}/fullchain.pem" ] || { log_error "Сертификат не найден"; return 1; }
 
     mkdir -p "${SELFMASK_PQ_PREFIX}/conf"
 
+    if [ "${NGINX_CUSTOM_ENABLED:-false}" = "true" ]; then
+        [ -f "$NGINX_CUSTOM_FILE" ] || {
+            log_error "Пользовательский конфиг nginx не найден: ${NGINX_CUSTOM_FILE}"
+            return 1
+        }
+        _selfmask_activate_nginx_conf "$NGINX_CUSTOM_FILE" || return 1
+        log_success "PQ nginx настроен (пользовательский конфиг)"
+        return 0
+    fi
+
     # Блоки на порту 80 (ACME-challenge + http→https redirect) нужны только
     # для Let's Encrypt. При самоподписанном сертификате домена в DNS нет,
     # ACME не используется, и занимать общий порт 80 незачем.
-    local _http80=""
+    local _http80="" _frontend_domain="${SELFMASK_DOMAIN}"
+    if [ "${SELFMASK_ENABLED:-false}" != "true" ] && [ "${SELFMASK_CONFIGURE_ACTIVE:-false}" != "true" ]; then
+        _frontend_domain=$(web_domain 2>/dev/null)
+    fi
     if [ "${SELFMASK_CERT_MODE:-letsencrypt}" != "selfsigned" ]; then
         _http80=$(cat << EOF
     server {
@@ -1017,7 +1530,7 @@ _selfmask_configure_nginx() {
 
     server {
         listen 80;
-        server_name ${SELFMASK_DOMAIN};
+        server_name ${_frontend_domain};
         root ${SELFMASK_SITE_DIR};
 
         location /.well-known/acme-challenge/ {
@@ -1026,22 +1539,37 @@ _selfmask_configure_nginx() {
         }
 
         location / {
-            return 301 https://${SELFMASK_DOMAIN}\$request_uri;
+            return 301 https://${_frontend_domain}\$request_uri;
         }
     }
 EOF
 )
     fi
 
-    cat > "$(_selfmask_pq_conf)" << EOF
-worker_processes auto;
+    # WEB Proxy: публичный порт забирает nginx и разводит по SNI, движок
+    # уходит на loopback. Без WEB конфиг остаётся прежним.
+    local _mime; _mime=$(_selfmask_nginx_mime_block)
 
-events {
-    worker_connections 1024;
-}
+    local _web_stream="" _web_map="" _web_server=""
+    if web_is_enabled 2>/dev/null; then
+        _web_stream=$(web_nginx_stream_block) || {
+            log_error "Не удалось собрать stream-блок WEB"; return 1; }
+        if web_frontend_is_direct 2>/dev/null && [ -n "$_web_stream" ]; then
+            log_error "WEB: раскладка split/WEB-only не должна содержать stream-блок"
+            return 1
+        fi
+        _web_map=$(web_nginx_upgrade_map)
+        _web_server=$(web_nginx_http_server "$_cert_dir") || return 1
+        if web_uses_managed_nginx 2>/dev/null \
+           && [ "$(grep -c 'proxy_next_upstream off;' <<< "$_web_server")" -ne 1 ]; then
+            log_error "WEB: proxy_next_upstream off должен встречаться в nginx-блоке ровно один раз"
+            return 1
+        fi
+    fi
 
-http {
-${_http80}
+    local _selfmask_servers=""
+    if [ "${SELFMASK_ENABLED:-false}" = "true" ] || [ "${SELFMASK_CONFIGURE_ACTIVE:-false}" = "true" ]; then
+        _selfmask_servers=$(cat << EOF
     server {
         listen 127.0.0.1:${SELFMASK_NGINX_BACKEND_PORT} ssl default_server;
         server_name _;
@@ -1083,35 +1611,31 @@ ${_http80}
             try_files \$uri \$uri/ =404;
         }
     }
+EOF
+)
+    fi
+
+    local _generated_conf
+    _generated_conf="$(_selfmask_generated_pq_conf)"
+    cat > "$_generated_conf" << EOF
+worker_processes auto;
+
+events {
+    worker_connections 1024;
+}
+
+${_web_stream}
+http {
+${_mime}
+    server_tokens off;
+${_web_map}
+${_http80}
+${_selfmask_servers}
+${_web_server}
 }
 EOF
 
-    local _test_out=""
-    _test_out=$("$(_selfmask_nginx_bin)" -t -c "$(_selfmask_pq_conf)" 2>&1) || {
-        log_error "Ошибка итогового конфига PQ nginx"
-        echo "$_test_out" | sed 's/^/    /'
-        return 1
-    }
-
-    # Убеждаемся что unit-файл существует — создаём/обновляем его
-    _selfmask_install_pq_service
-
-    _selfmask_free_ports || return 1
-
-    mkdir -p /var/lib/mtproxyl-nginx/body
-    mkdir -p /var/lib/mtproxyl-nginx/proxy
-    mkdir -p /var/lib/mtproxyl-nginx/fastcgi
-    mkdir -p /var/log/mtproxyl-nginx
-    mkdir -p /var/lock
-    rm -f /run/mtproxyl-nginx.pid 2>/dev/null || true
-
-    systemctl restart "${SELFMASK_PQ_SERVICE}" &>/dev/null || {
-        log_error "Не удалось перезапустить PQ nginx"
-        journalctl -u "${SELFMASK_PQ_SERVICE}" -n 20 --no-pager 2>/dev/null | sed 's/^/    /'
-        _selfmask_restore_port80_holders
-        return 1
-    }
-
+    _selfmask_activate_nginx_conf "$_generated_conf" || return 1
     log_success "PQ nginx настроен"
 }
 
@@ -1243,7 +1767,10 @@ _selfmask_apply_mtproxyl_settings() {
     if is_proxy_running; then
         log_info "Перезапуск прокси..."
         load_secrets
-        restart_proxy_container || true
+        restart_proxy_container || return 1
+        if web_is_enabled 2>/dev/null; then
+            _web_ensure_static_snapshot || return 1
+        fi
     else
         log_info "Прокси не запущен — запустите позже командой mtproxyl start"
     fi
@@ -1277,8 +1804,7 @@ _selfmask_apply_target_settings() {
         return 1
     fi
 
-    echo -en "  ${BOLD}Применить в ${DETECTED_CONFIG_PATH} и перезапустить цель? [Y/n]:${NC} "
-    local _yn; read_line _yn
+    local _yn; read_line _yn "  ${BOLD}Применить в ${DETECTED_CONFIG_PATH} и перезапустить цель? [Y/n]:${NC} "
     if [[ "$_yn" =~ ^[nN] ]]; then
         log_info "Пропущено — примените параметры вручную и перезапустите цель"
         return 0
@@ -1643,6 +2169,11 @@ selfmask_verify() {
 selfmask_setup() {
     check_root
 
+    if web_is_enabled 2>/dev/null && web_frontend_is_haproxy 2>/dev/null; then
+        log_error "Selfmask нельзя включить, пока внешний HAProxy держит WEB на :443"
+        return 1
+    fi
+
     if ! selfmask_supported_os; then
         log_error "Selfmask пока поддерживается только на Debian/Ubuntu"
         return 1
@@ -1679,7 +2210,7 @@ selfmask_setup() {
     else
         _selfmask_obtain_cert          || { _selfmask_restore_port80_holders; return 1; }
     fi
-    _selfmask_configure_nginx      || { _selfmask_restore_port80_holders; return 1; }
+    SELFMASK_CONFIGURE_ACTIVE="true" _selfmask_configure_nginx || { _selfmask_restore_port80_holders; return 1; }
     _selfmask_apply_mtproxyl_settings || { _selfmask_restore_port80_holders; return 1; }
     if [ "$SELFMASK_CERT_MODE" = "letsencrypt" ]; then
         _selfmask_setup_renewal || true
@@ -1703,7 +2234,7 @@ selfmask_setup() {
         echo -e "  ${BOLD}Домен:${NC}   https://${SELFMASK_DOMAIN}"
     fi
     echo -e "  ${BOLD}Сайт:${NC}    ${SELFMASK_SITE_DIR}"
-    echo -e "  ${BOLD}Схема:${NC}   telemt :${PROXY_PORT:-443} → mask → nginx 127.0.0.1:${SELFMASK_NGINX_BACKEND_PORT}"
+    echo -e "  ${BOLD}Схема:${NC}   $(_selfmask_scheme_line)"
     echo ""
 
     _selfmask_show_links_tail
@@ -1729,10 +2260,12 @@ selfmask_disable() {
     read_line _yn
     [[ "$_yn" =~ ^[yY] ]] || { log_info "Отменено"; return 0; }
 
-    systemctl disable --now "${SELFMASK_PQ_SERVICE}" &>/dev/null || true
-    rm -f "/etc/systemd/system/${SELFMASK_PQ_SERVICE}" 2>/dev/null || true
-    systemctl daemon-reload &>/dev/null || true
-    rm -f "$(_selfmask_pq_conf)" 2>/dev/null || true
+    if ! web_is_enabled 2>/dev/null; then
+        systemctl disable --now "${SELFMASK_PQ_SERVICE}" &>/dev/null || true
+        rm -f "/etc/systemd/system/${SELFMASK_PQ_SERVICE}" 2>/dev/null || true
+        systemctl daemon-reload &>/dev/null || true
+        rm -f "$(_selfmask_generated_pq_conf)" 2>/dev/null || true
+    fi
 
     SELFMASK_ENABLED="false"
 
@@ -1764,6 +2297,11 @@ selfmask_disable() {
     fi
 
     save_settings
+
+    if web_is_enabled 2>/dev/null; then
+        _selfmask_configure_nginx || return 1
+        log_info "PQ nginx оставлен для WEB Proxy"
+    fi
 
     if [ "${MTPROXYL_MODE:-manager}" != "manager" ]; then
         is_proxy_running && restart_target
@@ -1802,7 +2340,7 @@ selfmask_remove_pq_nginx() {
         log_info "Отключаем selfmask..."
         systemctl disable --now "${SELFMASK_PQ_SERVICE}" &>/dev/null || true
         rm -f "/etc/systemd/system/${SELFMASK_PQ_SERVICE}" 2>/dev/null || true
-        rm -f "$(_selfmask_pq_conf)" 2>/dev/null || true
+        rm -f "$(_selfmask_generated_pq_conf)" 2>/dev/null || true
 
         SELFMASK_ENABLED="false"
         if [ "${MTPROXYL_MODE:-manager}" = "manager" ] && \
@@ -1868,6 +2406,244 @@ _selfmask_cleanup_for_uninstall() {
     systemctl daemon-reload &>/dev/null || true
 }
 
+# Ставит нашу сборку поверх любой текущей: системный nginx без stream или
+# устаревшая своя — обе лечатся одинаково.
+selfmask_refresh_pq_nginx() {
+    check_root
+    log_info "Обновление nginx из состава MTProxyL (${SELFMASK_PQ_RELEASE_TAG})..."
+    _selfmask_install_pq_nginx nginx force || return 1
+    local _bin; _bin=$(_selfmask_pq_nginx_bin)
+    if _nginx_bin_has_static_stream "$_bin"; then
+        log_success "nginx умеет stream и ssl_preread — WEB Proxy можно включать"
+    else
+        log_warn "В этой сборке нет stream — раскладка shared работать не будет"
+    fi
+
+    # Конфиг переживает распаковку сам (его откладывает установка), остаётся
+    # перезапустить службу на новом бинарнике.
+    if [ "${SELFMASK_ENABLED:-false}" = "true" ] || web_is_enabled 2>/dev/null; then
+        _selfmask_install_pq_service "$(_selfmask_pq_conf)"
+        systemctl restart "${SELFMASK_PQ_SERVICE}" &>/dev/null || {
+            log_error "nginx не поднялся после обновления"; return 1; }
+        log_success "Служба перезапущена на новой сборке"
+    fi
+}
+
+nginx_custom_status_line() {
+    if nginx_custom_active; then
+        echo -e "${GREEN}включён${NC}"
+    elif [ -f "$NGINX_CUSTOM_FILE" ]; then
+        echo -e "${DIM}выключен, файл сохранён${NC}"
+    else
+        echo -e "${DIM}выключен${NC}"
+    fi
+}
+
+nginx_custom_status_json() {
+    local _size=0 _mtime=""
+    if [ -f "$NGINX_CUSTOM_FILE" ]; then
+        _size=$(stat -c %s "$NGINX_CUSTOM_FILE" 2>/dev/null || echo 0)
+        _mtime=$(stat -c %y "$NGINX_CUSTOM_FILE" 2>/dev/null || true)
+    fi
+    printf '{"enabled":%s,"active":%s,"file":"%s","file_exists":%s,"size":%s,"modified":"%s"}\n' \
+        "$([ "${NGINX_CUSTOM_ENABLED:-false}" = "true" ] && echo true || echo false)" \
+        "$(nginx_custom_active && echo true || echo false)" \
+        "$(json_escape "$NGINX_CUSTOM_FILE")" \
+        "$([ -f "$NGINX_CUSTOM_FILE" ] && echo true || echo false)" \
+        "${_size:-0}" "$(json_escape "$_mtime")"
+}
+
+_nginx_custom_validate() {
+    local _conf="$1" _out=""
+    [ -s "$_conf" ] || { log_error "Конфиг nginx пуст"; return 1; }
+    if _selfmask_conf_needs_stream "$_conf" && ! _system_nginx_has_stream \
+       && [ ! -x "$(_selfmask_pq_nginx_bin)" ]; then
+        log_info "Конфигу нужен stream — устанавливаем nginx из состава MTProxyL"
+        _selfmask_install_pq_nginx nginx force || return 1
+    fi
+    _out=$("$(_selfmask_nginx_bin_for_conf "$_conf")" -t -c "$_conf" 2>&1) || {
+        log_error "Проверка nginx -t завершилась ошибкой"
+        echo "$_out" | sed 's/^/    /'
+        return 1
+    }
+    [ -n "$_out" ] && echo "$_out" | sed 's/^/    /'
+    return 0
+}
+
+nginx_custom_show() {
+    local _conf="$NGINX_CUSTOM_FILE"
+    [ -f "$_conf" ] || _conf="$(_selfmask_generated_pq_conf)"
+    [ -f "$_conf" ] || { log_error "Конфиг nginx ещё не создан"; return 1; }
+    cat "$_conf"
+}
+
+nginx_custom_test() {
+    local _conf="$NGINX_CUSTOM_FILE"
+    [ -f "$_conf" ] || { log_error "Пользовательский конфиг не найден"; return 1; }
+    _nginx_custom_validate "$_conf" || return 1
+    log_success "Конфиг nginx корректен"
+}
+
+nginx_custom_enable() {
+    check_root
+    if nginx_custom_active; then
+        log_info "Пользовательский конфиг nginx уже включён"
+        return 0
+    fi
+    if [ "${SELFMASK_ENABLED:-false}" != "true" ] && ! web_is_enabled 2>/dev/null; then
+        log_error "Сначала включите Selfmask или WEB Proxy"
+        return 1
+    fi
+
+    echo ""
+    log_warn "MTProxyL перестанет пересобирать nginx.conf при изменении настроек"
+    echo -e "  ${DIM}Маршруты, домены и порты в пользовательском файле нужно синхронизировать вручную.${NC}"
+    local _yn; read_line _yn "  ${BOLD}Включить пользовательский конфиг nginx? [y/N]:${NC} "
+    [[ "$_yn" =~ ^[yY] ]] || { log_info "Отменено"; return 0; }
+
+    if [ ! -f "$NGINX_CUSTOM_FILE" ]; then
+        NGINX_CUSTOM_ENABLED="false"
+        _selfmask_configure_nginx || { _selfmask_restore_port80_holders; return 1; }
+        mkdir -p "$INSTALL_DIR"
+        cp "$(_selfmask_generated_pq_conf)" "$NGINX_CUSTOM_FILE" || {
+            _selfmask_restore_port80_holders
+            log_error "Не удалось создать ${NGINX_CUSTOM_FILE}"
+            return 1
+        }
+        chmod 600 "$NGINX_CUSTOM_FILE"
+        log_success "Создан пользовательский конфиг из текущего рабочего"
+    else
+        log_info "Используем сохранённый пользовательский конфиг"
+    fi
+
+    _nginx_custom_validate "$NGINX_CUSTOM_FILE" || {
+        _selfmask_restore_port80_holders
+        return 1
+    }
+    NGINX_CUSTOM_ENABLED="true"
+    if ! save_settings; then
+        NGINX_CUSTOM_ENABLED="false"
+        _selfmask_restore_port80_holders
+        return 1
+    fi
+    if ! _selfmask_configure_nginx; then
+        NGINX_CUSTOM_ENABLED="false"
+        save_settings
+        _selfmask_configure_nginx >/dev/null 2>&1 || true
+        _selfmask_restore_port80_holders
+        log_error "Пользовательский конфиг не включён"
+        return 1
+    fi
+    _selfmask_restore_port80_holders
+    log_success "Пользовательский конфиг nginx включён"
+    echo -e "  ${BOLD}Файл:${NC} ${NGINX_CUSTOM_FILE}"
+}
+
+nginx_custom_disable() {
+    check_root
+    if [ "${NGINX_CUSTOM_ENABLED:-false}" != "true" ]; then
+        log_info "Пользовательский конфиг nginx уже выключен"
+        return 0
+    fi
+
+    echo ""
+    log_warn "Nginx снова будет собираться из настроек MTProxyL"
+    echo -e "  ${DIM}Пользовательский файл останется на месте для повторного включения.${NC}"
+    local _yn; read_line _yn "  ${BOLD}Выключить пользовательский конфиг nginx? [y/N]:${NC} "
+    [[ "$_yn" =~ ^[yY] ]] || { log_info "Отменено"; return 0; }
+
+    NGINX_CUSTOM_ENABLED="false"
+    if ! save_settings; then
+        NGINX_CUSTOM_ENABLED="true"
+        return 1
+    fi
+    if [ "${SELFMASK_ENABLED:-false}" = "true" ] || web_is_enabled 2>/dev/null; then
+        if ! _selfmask_configure_nginx; then
+            NGINX_CUSTOM_ENABLED="true"
+            save_settings
+            _selfmask_configure_nginx >/dev/null 2>&1 || true
+            _selfmask_restore_port80_holders
+            log_error "Не удалось вернуться к стандартному конфигу"
+            return 1
+        fi
+        _selfmask_restore_port80_holders
+    fi
+    log_success "Стандартный конфиг nginx включён, пользовательский файл сохранён"
+}
+
+nginx_custom_write() {
+    check_root
+    mkdir -p "$INSTALL_DIR"
+    local _tmp _size _backup="${NGINX_CUSTOM_FILE}.bak"
+    _tmp=$(_mktemp "$INSTALL_DIR") || return 1
+    cat > "$_tmp"
+    _size=$(stat -c %s "$_tmp" 2>/dev/null || echo 0)
+    if [ "${_size:-0}" -eq 0 ] || [ "${_size:-0}" -gt 2097152 ]; then
+        rm -f "$_tmp"
+        log_error "Размер конфига должен быть от 1 байта до 2 МБ"
+        return 1
+    fi
+    _nginx_custom_validate "$_tmp" || { rm -f "$_tmp"; return 1; }
+
+    [ ! -f "$NGINX_CUSTOM_FILE" ] || cp -f "$NGINX_CUSTOM_FILE" "$_backup"
+    chmod 600 "$_tmp"
+    mv -f "$_tmp" "$NGINX_CUSTOM_FILE"
+
+    if nginx_custom_active && ! _selfmask_configure_nginx; then
+        if [ -f "$_backup" ]; then
+            mv -f "$_backup" "$NGINX_CUSTOM_FILE"
+            _selfmask_install_pq_service "$NGINX_CUSTOM_FILE"
+            systemctl restart "${SELFMASK_PQ_SERVICE}" &>/dev/null || true
+        fi
+        _selfmask_restore_port80_holders
+        log_error "Изменение отменено: nginx не запустился"
+        return 1
+    fi
+    _selfmask_restore_port80_holders
+    log_success "Пользовательский конфиг nginx сохранён"
+}
+
+nginx_custom_edit() {
+    check_root
+    [ -f "$NGINX_CUSTOM_FILE" ] || {
+        log_error "Пользовательский конфиг не найден — сначала включите режим"
+        return 1
+    }
+    if [ "${MTPROXYL_ASSUME_YES:-}" = "1" ] || [ ! -t 0 ]; then
+        log_error "Редактор недоступен без терминала"
+        log_info "Из скрипта: mtproxyl selfmask nginx-config write < nginx.conf"
+        return 1
+    fi
+
+    local _tmp _editor="${EDITOR:-nano}"
+    _tmp=$(_mktemp "$INSTALL_DIR") || return 1
+    cp "$NGINX_CUSTOM_FILE" "$_tmp" || return 1
+    command -v "$_editor" &>/dev/null || _editor="vi"
+    "$_editor" "$_tmp"
+    cmp -s "$_tmp" "$NGINX_CUSTOM_FILE" && { rm -f "$_tmp"; log_info "Файл не изменён"; return 0; }
+    nginx_custom_write < "$_tmp"
+    local _rc=$?
+    rm -f "$_tmp"
+    return $_rc
+}
+
+handle_nginx_custom_command() {
+    local _cmd="${1:-status}"
+    case "$_cmd" in
+        status) nginx_custom_status_json ;;
+        on|enable) nginx_custom_enable ;;
+        off|disable) nginx_custom_disable ;;
+        show) nginx_custom_show ;;
+        write) nginx_custom_write ;;
+        edit) nginx_custom_edit ;;
+        test) nginx_custom_test ;;
+        *)
+            log_error "Использование: mtproxyl selfmask nginx-config {status|on|off|show|write|edit|test}"
+            return 1
+            ;;
+    esac
+}
+
 handle_selfmask_command() {
     local subcmd="${1:-status}"
     shift 2>/dev/null || true
@@ -1883,6 +2659,8 @@ handle_selfmask_command() {
         setup)   selfmask_setup ;;
         apply)   selfmask_apply ;;
         pq-install) selfmask_install_pq_tools ;;
+        pq-nginx)   selfmask_refresh_pq_nginx ;;
+        nginx-config) handle_nginx_custom_command "$@" ;;
         panel-cert) check_root; selfmask_sync_panel_cert ;;
         set)     selfmask_set_param "$1" "$2" ;;
         settable) selfmask_settable_json ;;
@@ -1896,6 +2674,8 @@ handle_selfmask_command() {
             echo -e "    ${GREEN}selfmask apply${NC}    Применить по сохранённым параметрам"
             echo -e "    ${GREEN}selfmask set${NC} K V   Изменить параметр"
             echo -e "    ${GREEN}selfmask settable${NC} Список параметров (JSON)"
+            echo -e "    ${GREEN}selfmask pq-nginx${NC}  Обновить nginx из состава MTProxyL (нужен stream для WEB)"
+            echo -e "    ${GREEN}selfmask nginx-config${NC} Управление пользовательским nginx.conf"
             echo -e "    ${GREEN}selfmask panel-cert${NC} Отдать сертификат веб-панели"
             echo -e "    ${GREEN}selfmask verify${NC}   Проверка"
             echo -e "    ${GREEN}selfmask disable${NC}  Отключить"
@@ -2005,6 +2785,11 @@ selfmask_settable_json() {
 selfmask_apply() {
     check_root
 
+    if web_is_enabled 2>/dev/null && web_frontend_is_haproxy 2>/dev/null; then
+        log_error "Selfmask нельзя применить, пока внешний HAProxy держит WEB на :443"
+        return 1
+    fi
+
     if ! selfmask_supported_os; then
         log_error "Selfmask пока поддерживается только на Debian/Ubuntu"
         return 1
@@ -2047,24 +2832,40 @@ selfmask_apply() {
 
 # Поставить только инструменты PQ, без настройки заглушки: проверке домена
 # нужен openssl с X25519MLKEM768, а ради неё весь мастер — чересчур.
+# Установка из Release. Раньше выходила молча, если что-то уже стояло, —
+# и обновиться на свежий релиз можно было только снеся каталог руками.
+# Теперь показываем, что стоит и что предлагается, и переспрашиваем.
 selfmask_install_pq_tools() {
     check_root
 
-    if _system_openssl_has_pq; then
+    local _installed=""
+    [ -x "$(_selfmask_pq_openssl_bin)" ] && \
+        _installed=$("$(_selfmask_pq_openssl_bin)" version 2>/dev/null | awk '{print $2}')
+
+    if _system_openssl_has_pq && [ -z "$_installed" ]; then
         log_success "Уже есть: $(_pq_openssl_source)"
-        log_info "Ничего ставить не нужно — системный OpenSSL умеет PQ сам"
-        return 0
+        log_info "Системный OpenSSL умеет PQ сам, своя сборка не обязательна"
+        echo ""
+        local _a; read_line _a "  ${BOLD}Всё равно поставить сборку из Release (${SELFMASK_PQ_OPENSSL_VERSION})? [y/N]:${NC} "
+        [[ "$_a" =~ ^[yY] ]] || { log_info "Оставляем системный"; return 0; }
+    elif [ -n "$_installed" ]; then
+        log_info "Установлено сейчас: OpenSSL ${_installed}"
+        log_info "В Release: OpenSSL ${SELFMASK_PQ_OPENSSL_VERSION} (${SELFMASK_PQ_RELEASE_TAG})"
+        if [ "$_installed" = "${SELFMASK_PQ_OPENSSL_VERSION}" ]; then
+            log_warn "Версия та же — переустановка заменит файлы теми же самыми"
+        fi
+        echo ""
+        local _a; read_line _a "  ${BOLD}Скачать и переустановить из Release? [y/N]:${NC} "
+        [[ "$_a" =~ ^[yY] ]] || { log_info "Оставляем как есть"; return 0; }
     fi
-    if [ -x "$(_selfmask_pq_openssl_bin)" ]; then
-        log_success "PQ OpenSSL уже установлен"
-        return 0
-    fi
+
     if ! selfmask_supported_os; then
         log_error "Готовая сборка есть только для Debian/Ubuntu"
         log_info "На других системах поставьте OpenSSL ${SELFMASK_MIN_SYSTEM_OPENSSL}+ средствами дистрибутива"
         return 1
     fi
 
-    _selfmask_install_pq_nginx openssl || return 1
+    # force: без него установка увидела бы уже лежащие файлы и вышла молча.
+    _selfmask_install_pq_nginx openssl force || return 1
     log_success "Готово: $(_pq_openssl_source)"
 }

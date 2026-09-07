@@ -11,6 +11,7 @@ declare -A _AG_VAL=()
 # Пункты в порядке показа: ключ|подпись|можно ли править значение.
 _AG_ITEMS=(
     "engine|Движок|yes"
+    "proxy_mode|Транспорт|no"
     "port|Порт прокси|yes"
     "ports|Порты метрик и API|no"
     "host|Домен в ссылках|yes"
@@ -21,6 +22,7 @@ _AG_ITEMS=(
     "fixes|Zapret2 или SYN-лимитер|no"
     "meko|Оптимизация By-MEKO|no"
     "selfmask|Selfmask|yes"
+    "web|WEB Proxy|yes"
     "geoip|База GeoIP|no"
     "block|Список блокировок|no"
     "force|Ставить поверх существующей|no"
@@ -39,6 +41,7 @@ _argsgen_defaults() {
     else
         _AG_VAL[engine]="docker"
     fi
+    _AG_ON[proxy_mode]="yes"; _AG_VAL[proxy_mode]="${PROXY_MODE:-mtproto}"
     _AG_ON[port]="yes";   _AG_VAL[port]="${PROXY_PORT:-443}"
     _AG_ON[ports]="no";   _AG_VAL[ports]="${PROXY_METRICS_PORT:-9090}/${PROXY_API_PORT:-9091}"
     _AG_ON[sni]="yes";    _AG_VAL[sni]="${PROXY_DOMAIN:-autoscout24.ru}"
@@ -77,6 +80,13 @@ _argsgen_defaults() {
         _AG_ON[selfmask]="no"; _AG_VAL[selfmask]="выключен"
     fi
 
+    if web_is_enabled 2>/dev/null; then
+        _AG_ON[web]="yes"
+        _AG_VAL[web]="$(web_domain 2>/dev/null) (${WEB_FRONTEND:-nginx}, ${WEB_LAYOUT:-shared}, ${WEB_CARRIER:-websocket}, ${WEB_DECOY_MODE:-empty})"
+    else
+        _AG_ON[web]="no"; _AG_VAL[web]="выключен"
+    fi
+
     _AG_ON[geoip]="$(geoip_installed 2>/dev/null && echo yes || echo no)"
     _AG_VAL[geoip]="$(geoip_installed 2>/dev/null && echo "установлена" || echo "нет")"
 
@@ -101,6 +111,7 @@ _argsgen_build() {
             *)        _a+=(--engine docker) ;;
         esac
     fi
+    [ "${_AG_ON[proxy_mode]}" = "yes" ] && _a+=(--proxy-mode "${_AG_VAL[proxy_mode]}")
     [ "${_AG_ON[port]}" = "yes" ] && _a+=(--port "${_AG_VAL[port]}")
     if [ "${_AG_ON[ports]}" = "yes" ]; then
         _a+=(--metrics-port "${PROXY_METRICS_PORT:-9090}" --api-port "${PROXY_API_PORT:-9091}")
@@ -153,6 +164,32 @@ _argsgen_build() {
         [ -n "${SELFMASK_CERT_EMAIL:-}" ] && _a+=(--selfmask-email "$SELFMASK_CERT_EMAIL")
         [ -n "${SELFMASK_SITE_SOURCE:-}" ] && _a+=(--selfmask-template "$SELFMASK_SITE_SOURCE")
         [ -n "${SELFMASK_NGINX_BACKEND_PORT:-}" ] && _a+=(--selfmask-backend-port "$SELFMASK_NGINX_BACKEND_PORT")
+    fi
+
+    if [ "${_AG_ON[web]}" = "yes" ]; then
+        _a+=(--web yes --web-layout "${WEB_LAYOUT:-shared}")
+        _a+=(--web-frontend "${WEB_FRONTEND:-nginx}")
+        if [ "${WEB_FRONTEND:-nginx}" = "haproxy" ] && [ -n "${WEB_HAPROXY_CERT:-}" ]; then
+            _a+=(--web-haproxy-cert "$WEB_HAPROXY_CERT")
+        fi
+        _a+=(--web-carrier "${WEB_CARRIER:-websocket}")
+        _a+=(--web-secret-mode "${WEB_SECRET_MODE:-dd}")
+        [ -n "${WEB_DOMAIN:-}" ] && _a+=(--web-domain "$WEB_DOMAIN")
+        case "${WEB_DECOY_MODE:-empty}" in
+            static_directory) _a+=(--web-decoy site) ;;
+            http_upstream)
+                _a+=(--web-decoy upstream)
+                [ -n "${WEB_DECOY_UPSTREAM:-}" ] \
+                    && _a+=(--web-decoy-upstream "$WEB_DECOY_UPSTREAM") ;;
+            *) _a+=(--web-decoy empty) ;;
+        esac
+        { [ "${WEB_FRONTEND:-nginx}" = "nginx" ] \
+          && { web_is_only_mode || [ "${WEB_LAYOUT:-shared}" = "split" ]; }; } \
+            && _a+=(--web-port "${WEB_PUBLIC_PORT:-443}")
+        if [ "${_AG_ON[selfmask]}" != "yes" ]; then
+            [ -n "${SELFMASK_CERT_EMAIL:-}" ] && _a+=(--selfmask-email "$SELFMASK_CERT_EMAIL")
+            [ -n "${SELFMASK_SITE_SOURCE:-}" ] && _a+=(--selfmask-template "$SELFMASK_SITE_SOURCE")
+        fi
     fi
 
     [ "${_AG_ON[geoip]}" = "yes" ] && _a+=(--geoip yes)
@@ -247,6 +284,9 @@ _argsgen_edit() {
         selfmask)
             echo -e "  ${DIM}Домен и тип сертификата берутся из текущих настроек Selfmask.${NC}"
             echo -e "  ${DIM}Изменить их: меню «Дополнения» → Selfmask.${NC}" ;;
+        web)
+            echo -e "  ${DIM}Домен, раскладка и carrier берутся из текущих настроек WEB.${NC}"
+            echo -e "  ${DIM}Изменить их: mtproxyl web set. Selfmask не обязателен.${NC}" ;;
         *) log_info "У этого пункта нечего править — он только включается и выключается" ;;
     esac
     return 0

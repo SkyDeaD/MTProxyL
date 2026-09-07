@@ -1,6 +1,6 @@
 import { NavLink } from 'react-router-dom';
 import { useBranding } from '@/hooks/useBranding';
-import { LayoutDashboard, Users, Activity, Shield, Network, Settings, ArrowUpCircle, ScrollText, LogOut, X, Sun, Moon, ToggleLeft, Globe, Archive, ShieldAlert, MapPin, Route, SlidersHorizontal, Gauge, FileCode, Puzzle, Radar, Wrench, Bot, Waypoints, ShieldBan } from 'lucide-react';
+import { LayoutDashboard, Users, Activity, Shield, Network, Settings, ArrowUpCircle, ScrollText, LogOut, X, Sun, Moon, ToggleLeft, Globe, Globe2, Archive, ShieldAlert, MapPin, Route, SlidersHorizontal, Gauge, FileCode, Puzzle, Radar, Wrench, Bot, Waypoints, ShieldBan } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from '@/hooks/useTheme';
@@ -24,6 +24,7 @@ const mtproxylNavItems = [
   { to: '/mode', icon: ToggleLeft, label: 'Режим работы', managerOnly: false },
   { to: '/proxy-settings', icon: SlidersHorizontal, label: 'Настройки прокси', managerOnly: true },
   { to: '/selfmask', icon: Globe, label: 'Selfmask', managerOnly: false },
+  { to: '/web', icon: Globe2, label: 'WEB Proxy', managerOnly: true },
   { to: '/traffic', icon: Gauge, label: 'Трафик', managerOnly: false },
   { to: '/nft', icon: ShieldAlert, label: 'Лимитер и защита', managerOnly: false },
   { to: '/geoblock', icon: MapPin, label: 'Блокировка стран', managerOnly: false },
@@ -78,7 +79,11 @@ export function Sidebar({ isOpen = true, onClose }: SidebarProps) {
           </button>
         </div>
 
-        <nav className="flex-1 min-h-0 overflow-y-auto p-3 space-y-1">
+        {/* pr-4 и стабильный жёлоб: иначе длинные пункты уходили под полосу прокрутки */}
+        <nav
+          className="flex-1 min-h-0 overflow-y-auto p-3 pr-4 space-y-1"
+          style={{ scrollbarGutter: 'stable' }}
+        >
           {navItems.map(({ to, icon: Icon, label }) => (
             <NavLink
               key={to}
@@ -87,15 +92,15 @@ export function Sidebar({ isOpen = true, onClose }: SidebarProps) {
               onClick={onClose}
               className={({ isActive }) =>
                 cn(
-                  'flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors',
+                  'flex items-center gap-3 min-w-0 px-3 py-2 rounded-md text-sm transition-colors',
                   isActive
                     ? 'bg-accent/15 text-accent font-medium shadow-[inset_2px_0_0_rgb(var(--c-accent))]'
                     : 'text-text-secondary hover:text-text-primary hover:bg-surface-hover'
                 )
               }
             >
-              <Icon size={18} />
-              {label}
+              <Icon size={18} className="shrink-0" />
+              <span className="truncate">{label}</span>
             </NavLink>
           ))}
 
@@ -113,15 +118,15 @@ export function Sidebar({ isOpen = true, onClose }: SidebarProps) {
                   onClick={onClose}
                   className={({ isActive }) =>
                     cn(
-                      'flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors',
+                      'flex items-center gap-3 min-w-0 px-3 py-2 rounded-md text-sm transition-colors',
                       isActive
                         ? 'bg-accent/15 text-accent font-medium shadow-[inset_2px_0_0_rgb(var(--c-accent))]'
                         : 'text-text-secondary hover:text-text-primary hover:bg-surface-hover'
                     )
                   }
                 >
-                  <Icon size={18} />
-                  {label}
+                  <Icon size={18} className="shrink-0" />
+                  <span className="truncate">{label}</span>
                 </NavLink>
               ))}
             </>

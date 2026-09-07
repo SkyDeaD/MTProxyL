@@ -1,23 +1,30 @@
 import { useCallback, useEffect, useState } from 'react';
-import { X } from 'lucide-react';
+import { Flag, X } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ErrorAlert } from '@/components/ErrorAlert';
 import { OperationProgress } from '@/components/OperationProgress';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { mtproxylNetApi } from '@/lib/api';
 import { useMtproxylOperation } from '@/hooks/useMtproxyl';
 import { PageShell } from '@/components/layout/PageShell';
 import { EmptyState, SkeletonRows } from '@/components/ui/state';
 
-/** Turns a country code into its flag emoji via regional indicator symbols. */
-function flag(code: string): string {
-  if (!/^[a-zA-Z]{2}$/.test(code)) return '';
-  return String.fromCodePoint(
-    ...code
-      .toUpperCase()
-      .split('')
-      .map((c) => 0x1f1e6 + c.charCodeAt(0) - 65),
+function CountryFlag({ code }: { code: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) return <Flag size={16} aria-label={`Флаг ${code.toUpperCase()}`} />;
+  return (
+    <img
+      src={`https://flagcdn.com/24x18/${code.toLowerCase()}.png`}
+      width={24}
+      height={18}
+      alt={`Флаг ${code.toUpperCase()}`}
+      referrerPolicy="no-referrer"
+      loading="lazy"
+      onError={() => setFailed(true)}
+      className="rounded-sm"
+    />
   );
 }
 
@@ -29,16 +36,25 @@ const COUNTRY_NAMES: Record<string, string> = {
 
 export function GeoblockPage() {
   const [countries, setCountries] = useState<string[]>([]);
+  const [mode, setMode] = useState<'blacklist' | 'whitelist'>('blacklist');
+  const [rulesActive, setRulesActive] = useState(false);
+  const [portsMatch, setPortsMatch] = useState(true);
+  const [serviceEnabled, setServiceEnabled] = useState(false);
   const [code, setCode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [removing, setRemoving] = useState<string | null>(null);
+  const [confirmWhitelist, setConfirmWhitelist] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const st = await mtproxylNetApi.geoblock();
       setCountries(st.countries);
+      setMode(st.mode || 'blacklist');
+      setRulesActive(st.rules_active);
+      setPortsMatch(st.ports_match ?? true);
+      setServiceEnabled(st.service_enabled);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Не удалось получить список');
@@ -83,13 +99,34 @@ export function GeoblockPage() {
     }
   };
 
+  const changeMode = async (next: 'blacklist' | 'whitelist') => {
+    setConfirmWhitelist(false);
+    if (next === mode) return;
+    try {
+      start(await mtproxylNetApi.geoblockMode(next));
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Не удалось сменить режим');
+    }
+  };
+
+  const reapply = async () => {
+    try {
+      start(await mtproxylNetApi.geoblockReapply());
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Не удалось переприменить правила');
+    }
+  };
+
   return (
     <PageShell title="Блокировка по странам"
       description={
         <>
-        Диапазоны адресов выбранных стран блокируются на порту прокси. Списки берутся с
-        ipdeny.com, поэтому первое добавление страны занимает время.
-        
+        {mode === 'whitelist'
+        ? 'На публичных портах прокси и WEB разрешены только выбранные страны.'
+        : 'Диапазоны адресов выбранных стран блокируются на публичных портах прокси и WEB.'}
+        Списки берутся с ipdeny.com, поэтому первое добавление страны занимает время.
         </>
       }>
       {error && <ErrorAlert message={error} onRetry={load} />}
@@ -97,7 +134,45 @@ export function GeoblockPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Добавить страну</CardTitle>
+          <CardTitle>Режим</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant={mode === 'blacklist' ? 'default' : 'outline'}
+              onClick={() => void changeMode('blacklist')}
+              disabled={running}
+            >
+              Блокировать выбранные
+            </Button>
+            <Button
+              variant={mode === 'whitelist' ? 'default' : 'outline'}
+              onClick={() => setConfirmWhitelist(true)}
+              disabled={running}
+            >
+              Разрешать только выбранные
+            </Button>
+            {countries.length > 0 && (
+              <Button variant="outline" onClick={() => void reapply()} disabled={running}>
+                Переприменить
+              </Button>
+            )}
+          </div>
+          <div className="text-xs text-text-secondary space-y-1">
+            <div>
+              Правила: {rulesActive ? (portsMatch ? 'активны' : 'нужно переприменить на текущие порты') : countries.length > 0 ? 'не применены' : 'список пуст'}
+            </div>
+            <div>После перезагрузки: {serviceEnabled ? 'восстановятся автоматически' : 'служба не включена'}</div>
+            {mode === 'whitelist' && countries.length === 0 && (
+              <div>Ограничения включатся после добавления первой разрешённой страны.</div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>{mode === 'whitelist' ? 'Добавить разрешённую страну' : 'Добавить заблокированную страну'}</CardTitle>
         </CardHeader>
         <CardContent>
           <form
@@ -115,7 +190,7 @@ export function GeoblockPage() {
               className="max-w-[120px]"
             />
             <Button type="submit" disabled={running}>
-              Заблокировать
+              Добавить
             </Button>
             <span className="text-xs text-text-secondary">
               Двухбуквенный код ISO 3166-1
@@ -126,7 +201,7 @@ export function GeoblockPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Заблокированные страны</CardTitle>
+          <CardTitle>{mode === 'whitelist' ? 'Разрешённые страны' : 'Заблокированные страны'}</CardTitle>
         </CardHeader>
         <CardContent>
           {loading && countries.length === 0 ? (
@@ -140,7 +215,7 @@ export function GeoblockPage() {
                   key={c}
                   className="inline-flex items-center gap-2 bg-surface-hover border border-border rounded-full pl-3 pr-1 py-1 text-sm"
                 >
-                  <span>{flag(c)}</span>
+                  <CountryFlag code={c} />
                   <span className="text-text-primary uppercase">{c}</span>
                   {COUNTRY_NAMES[c] && (
                     <span className="text-text-secondary text-xs">{COUNTRY_NAMES[c]}</span>
@@ -148,7 +223,7 @@ export function GeoblockPage() {
                   <button
                     onClick={() => remove(c)}
                     disabled={removing === c || running}
-                    title="Разблокировать"
+                    title="Удалить из списка"
                     className="p-1 rounded-full hover:bg-danger/15 hover:text-danger disabled:opacity-40"
                   >
                     <X size={14} />
@@ -159,7 +234,17 @@ export function GeoblockPage() {
           )}
         </CardContent>
       </Card>
-    
+
+      <ConfirmDialog
+        open={confirmWhitelist}
+        title="Включить реверсивную блокировку?"
+        message={countries.length === 0
+          ? 'Режим будет выбран сейчас. Пока список пуст, подключения не ограничиваются. После добавления первой страны доступ останется только у выбранных стран.'
+          : 'Подключаться к прокси смогут только адреса выбранных стран. Остальные страны будут заблокированы на публичных портах.'}
+        confirmLabel="Включить"
+        onConfirm={() => void changeMode('whitelist')}
+        onClose={() => setConfirmWhitelist(false)}
+      />
     </PageShell>
   );
 }

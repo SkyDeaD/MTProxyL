@@ -20,7 +20,7 @@ export LC_NUMERIC=C
 export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a
 
-VERSION="1.5.9"
+VERSION="1.6.11"
 SCRIPT_NAME="mtproxyl"
 INSTALL_DIR="/opt/mtproxyl"
 CONFIG_DIR="${INSTALL_DIR}/mtproxy"
@@ -62,10 +62,11 @@ if [ -z "$GITHUB_BRANCH" ] && [ -r "${INSTALL_DIR}/.branch" ]; then
 fi
 [ -n "$GITHUB_BRANCH" ] || GITHUB_BRANCH="main"
 GITHUB_RAW="https://raw.githubusercontent.com/${GITHUB_REPO}/${GITHUB_BRANCH}"
+GITHUB_RAW_REFS="https://raw.githubusercontent.com/${GITHUB_REPO}/refs/heads/${GITHUB_BRANCH}"
 REGISTRY_IMAGE="ghcr.io/liafanx/mtproxyl-telemt"
 TELEMT_GITHUB="telemt/telemt"
-TELEMT_MIN_VERSION="3.4.25"
-TELEMT_COMMIT="d851200"
+TELEMT_MIN_VERSION="3.5.5"
+TELEMT_COMMIT="ac71d92"
 
 # Bash version check
 if [ "${BASH_VERSINFO[0]:-0}" -lt 4 ]; then
@@ -79,6 +80,8 @@ fi
 _stdin_is_payload="false"
 [ "${MTPROXYL_ASSUME_YES:-}" = "1" ] && _stdin_is_payload="true"
 [ "${1:-}" = "superexpert" ] && [ "${2:-}" = "write" ] && _stdin_is_payload="true"
+[ "${1:-}" = "selfmask" ] && [ "${2:-}" = "nginx-config" ] && [ "${3:-}" = "write" ] && _stdin_is_payload="true"
+[ "${1:-}" = "web" ] && [ "${2:-}" = "nginx-config" ] && [ "${3:-}" = "write" ] && _stdin_is_payload="true"
 
 if [ "$_stdin_is_payload" != "true" ] \
    && [[ ! -t 0 ]] && [[ -e /dev/tty ]] && ps -p $$ -o stat= | grep -q "+"; then
@@ -87,7 +90,7 @@ fi
 
 # Загрузка библиотек
 LIB_DIR="${INSTALL_DIR}/lib"
-for _lib in colors utils settings detect secrets config docker binengine engine traffic stats availability dc warp geoblock geoip upstream backup nft ipblock selfmask panel tgbot alertbot tui_main tui_proxy tui_secrets tui_links tui_settings tui_security tui_traffic tui_engine tui_backup tui_expert tui_nft tui_ipblock tui_selfmask tui_addons tui_tgbot tui_alertbot tui_warp tui_detect expert_catalog expert_mode settings_cli install install_args migrate argsgen; do
+for _lib in colors utils settings detect secrets config docker binengine engine traffic stats availability dc warp geoblock geoip upstream backup nft ipblock selfmask web panel tgbot alertbot tui_main tui_proxy tui_secrets tui_links tui_settings tui_security tui_traffic tui_engine tui_backup tui_expert tui_nft tui_ipblock tui_selfmask tui_web tui_addons tui_tgbot tui_alertbot tui_warp tui_detect expert_catalog expert_mode settings_cli install install_args migrate argsgen; do
     if [ -f "${LIB_DIR}/${_lib}.sh" ]; then
         # shellcheck source=/dev/null
         source "${LIB_DIR}/${_lib}.sh"
@@ -302,8 +305,9 @@ cli_main() {
                     # конфига цели, а не наш PROXY_DOMAIN.
                     _mode_sni=$(_current_sni_domain 2>/dev/null || echo "")
 
-                    printf '{"mode":"%s","engine":"%s","tools_only":%s,"detected_mode":"%s","detected_config":"%s","port":%d,"sni":"%s","engine_config":"%s","api_port":%d,"api_enabled":%s,"own_container":"%s","running":%s,"log_kind":"%s","log_target":"%s"}\n' \
+                    printf '{"mode":"%s","proxy_mode":"%s","engine":"%s","tools_only":%s,"detected_mode":"%s","detected_config":"%s","port":%d,"sni":"%s","engine_config":"%s","api_port":%d,"api_enabled":%s,"own_container":"%s","running":%s,"log_kind":"%s","log_target":"%s"}\n' \
                         "$(json_escape "${MTPROXYL_MODE:-manager}")" \
+                        "$(json_escape "${PROXY_MODE:-mtproto}")" \
                         "$(json_escape "$(engine_backend)")" \
                         "$([ "${TOOLS_ONLY:-false}" = "true" ] && echo true || echo false)" \
                         "$(json_escape "${DETECTED_MODE:-unknown}")" \
@@ -410,7 +414,9 @@ cli_main() {
         metrics)
             # В реаниматоре порт метрик читается из конфига цели —
             # без load_detect_settings путь пуст и метрики «недоступны».
-            load_settings; load_detect_settings
+            # Без load_secrets список меток пуст, и весь трафик уходит
+            # в строку «удалённые пользователи».
+            load_settings; load_secrets; load_detect_settings
             handle_metrics_command "$@"
             ;;
 
@@ -575,6 +581,13 @@ cli_main() {
             # [censorship] в конфиг цели, а путь к нему в DETECTED_CONFIG_PATH.
             load_settings; load_detect_settings
             handle_selfmask_command "$@"
+            ;;
+
+        web)
+            # load_nft_settings нужен для предупреждения про zapret2: его
+            # состояние лежит в nft-rules.conf, а не в settings.conf.
+            load_settings; load_detect_settings; load_nft_settings
+            handle_web_command "$@"
             ;;
 
         pq-check)

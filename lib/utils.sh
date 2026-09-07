@@ -387,11 +387,13 @@ proxy_link_host() {
     echo "$_host"
 }
 
-# Хост для [general.links] public_host из настройки «IP/домен сервера».
-# Пусто — движок определяет сам. IPv6-литерал тоже оставляем ему: в ссылку
-# он идёт в скобках.
+# Хост для [general.links] public_host. В shared WEB движок видит loopback,
+# поэтому при пустой настройке определяем публичный адрес сами.
 proxy_public_host() {
     local _v="${CUSTOM_IP:-}"
+    if [ -z "$_v" ] && web_is_enabled 2>/dev/null && ! web_layout_is_split 2>/dev/null; then
+        _v=$(get_public_ip)
+    fi
     [ -n "$_v" ] || return 1
     case "$_v" in *:*) return 1 ;; esac   # IPv6
     printf '%s' "$_v"
@@ -620,24 +622,40 @@ _fix_read_choice() {
     read_choice "$_prompt" "$_default"
 }
 
+# Цветовые последовательности закрываем \001..\002: иначе readline считает их
+# видимыми символами, промахивается с шириной приглашения и при забое затирает
+# его вместе с введённым символом.
+_rl_prompt() {
+    printf '%b' "$1" | awk 'BEGIN { ORS = "" } { gsub(/\033\[[0-9;]*m/, sprintf("%c&%c", 1, 2)); print }'
+}
+
+# Приглашение вторым аргументом отдаётся readline — тогда оно переживает
+# забой и перерисовку строки. Без него приглашение печатает вызывающий код.
 read_line() {
-    local __var="$1" __ans=""
+    local __var="$1" __prompt="${2-}" __ans=""
     # Неинтерактивный режим (панель, скрипты): подтверждения не спрашиваем.
     # Отдаём слово, которого ждут все подтверждающие ветки: 'yes' проходит
     # и строгие проверки [ "$_c" != "yes" ], и мягкие [[ =~ ^[yY] ]].
     if [ "${MTPROXYL_ASSUME_YES:-}" = "1" ]; then
+        [ -n "$__prompt" ] && printf '%b' "$__prompt"
         printf -v "$__var" '%s' "yes"
+        [ -n "$__prompt" ] && echo "yes"
         return 0
     fi
     # Установка аргументами: отвечать некому, а ждать ввода — значит зависнуть.
     # Пустой ответ равен нажатому Enter, то есть значению по умолчанию.
     if [ "${MTPROXYL_NONINTERACTIVE:-false}" = "true" ]; then
+        [ -n "$__prompt" ] && printf '%b' "$__prompt"
         printf -v "$__var" '%s' ""
         echo "<по умолчанию>"
         return 0
     fi
-    IFS= read -er __ans || true
-    [ -z "$__ans" ] && [ -t 0 ] && echo ""
+    if [ -n "$__prompt" ]; then
+        IFS= read -erp "$(_rl_prompt "$__prompt")" __ans || true
+    else
+        IFS= read -er __ans || true
+        [ -z "$__ans" ] && [ -t 0 ] && echo ""
+    fi
     printf -v "$__var" '%s' "$__ans"
 }
 
@@ -706,9 +724,41 @@ fix_tty_input() {
 # ── Проверка обновлений ───────────────────────────────────────
 _UPDATE_AVAILABLE=""
 
+# Получить небольшой файл из GitHub Raw.
+# Основной URL сохраняем прежним; refs/heads используется только как fallback.
+_github_raw_fetch() {
+    local _path="$1"
+    local _timeout="${2:-15}"
+
+    curl -fsS --max-time "$_timeout" \
+        "${GITHUB_RAW}/${_path}" 2>/dev/null && return 0
+
+    curl -fsS --max-time "$_timeout" \
+        "${GITHUB_RAW_REFS}/${_path}" 2>/dev/null
+}
+
+# Скачать файл из GitHub Raw в указанный путь.
+# Сначала исчерпываются retry обычного URL, только затем пробуем refs/heads.
+_github_raw_download() {
+    local _path="$1"
+    local _dest="$2"
+    local _timeout="${3:-30}"
+
+    if curl -fsS --retry 3 --retry-delay 2 --max-time "$_timeout" \
+        "${GITHUB_RAW}/${_path}" -o "$_dest" 2>/dev/null; then
+        return 0
+    fi
+
+    : > "$_dest"
+    log_warn "Основной GitHub Raw недоступен для ${_path}, пробуем refs/heads..."
+
+    curl -fsS --retry 3 --retry-delay 2 --max-time "$_timeout" \
+        "${GITHUB_RAW_REFS}/${_path}" -o "$_dest" 2>/dev/null
+}
+
 check_for_update() {
     local _remote_ver
-    _remote_ver=$(curl -fsS --max-time 5 "${GITHUB_RAW}/version" 2>/dev/null | tr -d '[:space:]')
+    _remote_ver=$(_github_raw_fetch "version" 5 | tr -d '[:space:]')
     [ -z "$_remote_ver" ] && return 0
     # Только строго новее: на dev-сборке локальная версия обгоняет ветку, и
     # «доступно обновление 1.4.9 → 1.4.8» звалось бы откатом назад.
@@ -730,7 +780,7 @@ _version_gt() {
 # github. Сетевой сбой — не ошибка команды, о нём говорит поле error.
 update_check_json() {
     local _latest _err="" _avail="false"
-    _latest=$(curl -fsS --max-time 8 "${GITHUB_RAW}/version" 2>/dev/null | tr -d '[:space:]')
+    _latest=$(_github_raw_fetch "version" 8 | tr -d '[:space:]')
     if [ -z "$_latest" ]; then
         _err="не удалось получить номер версии с github.com"
     elif ! [[ "$_latest" =~ ^[0-9]+(\.[0-9]+)*$ ]]; then
@@ -762,7 +812,7 @@ self_update() {
     # бы файл на месте, а его в этот момент читает работающий bash.
     local _tmp="${INSTALL_DIR}/.mtproxyl-update-$$.sh"
 
-    if ! curl -fsS --retry 3 --retry-delay 2 --max-time 30 "${GITHUB_RAW}/mtproxyl.sh" -o "$_tmp" 2>/dev/null; then
+    if ! _github_raw_download "mtproxyl.sh" "$_tmp" 30; then
         log_error "Не удалось скачать mtproxyl.sh"
         log_info "Проверьте интернет и доступность github.com"
         rm -f "$_tmp"
@@ -811,7 +861,7 @@ self_update() {
     if [ -z "$_lib_list" ]; then
         log_warn "Не удалось извлечь список библиотек из нового скрипта"
         log_info "Используем резервный список"
-        _lib_list="colors utils settings detect secrets config docker binengine engine traffic stats availability dc warp geoblock geoip upstream backup nft ipblock selfmask panel tgbot alertbot tui_main tui_proxy tui_secrets tui_links tui_settings tui_security tui_traffic tui_engine tui_backup tui_expert tui_nft tui_ipblock tui_selfmask tui_addons tui_tgbot tui_alertbot tui_warp tui_detect expert_catalog expert_mode settings_cli install install_args migrate argsgen"
+                _lib_list="colors utils settings detect secrets config docker binengine engine traffic stats availability dc warp geoblock geoip upstream backup nft ipblock selfmask web panel tgbot alertbot tui_main tui_proxy tui_secrets tui_links tui_settings tui_security tui_traffic tui_engine tui_backup tui_expert tui_nft tui_ipblock tui_selfmask tui_web tui_addons tui_tgbot tui_alertbot tui_warp tui_detect expert_catalog expert_mode settings_cli install install_args migrate argsgen"
     fi
 
     local _total=0 _ok=0 _failed=0 _skipped=0
@@ -832,7 +882,7 @@ self_update() {
             continue
         }
 
-        if curl -fsS --retry 3 --retry-delay 2 --max-time 20 "${GITHUB_RAW}/lib/${lib}.sh" -o "$_lib_tmp" 2>/dev/null; then
+        if _github_raw_download "lib/${lib}.sh" "$_lib_tmp" 20; then
             if bash -n "$_lib_tmp" 2>/dev/null; then
                 mv "$_lib_tmp" "${LIB_DIR}/${lib}.sh"
                 chmod 644 "${LIB_DIR}/${lib}.sh" 2>/dev/null || true
@@ -868,9 +918,26 @@ self_update() {
         echo ""
     fi
 
+    if [ -n "${BLOCKLIST_COUNTRIES:-}" ] && [ -r "${LIB_DIR}/geoblock.sh" ]; then
+        source "${LIB_DIR}/geoblock.sh"
+        if declare -F geoblock_install_service >/dev/null; then
+            geoblock_install_service >/dev/null 2>&1 \
+                && log_success "Автовосстановление гео-блокировки включено" \
+                || log_warn "Не удалось включить службу ${GEOBLOCK_SERVICE:-mtproxyl-geoblock}"
+            if ! geoblock_rules_active || ! geoblock_rules_match_ports; then
+                geoblock_restore >/dev/null 2>&1 \
+                    && log_success "Правила гео-блокировки восстановлены" \
+                    || log_warn "Правила не восстановились — выполните: mtproxyl geoblock reapply"
+            fi
+        fi
+    fi
+
     # Код бота живёт в том же репозитории и обновляется вместе со скриптом:
     # иначе бот однажды позовёт подкоманду, которой в его правах ещё нет.
     if tgbot_installed 2>/dev/null; then
+        # На диске библиотека уже новая, а в памяти — та, с которой мы
+        # стартовали. Перечитываем: обновлять бота должна новая версия.
+        [ -r "${LIB_DIR}/tgbot.sh" ] && source "${LIB_DIR}/tgbot.sh"
         log_info "Обновляем телеграм-бота..."
         if tgbot_update_sources; then
             log_success "Телеграм-бот обновлён и перезапущен"
@@ -892,6 +959,16 @@ self_update() {
     fi
 
     log_success "MTProxyL обновлён: v${VERSION} → v${_new_ver}"
+
+    # Панель ходит к нам через список разрешённых подкоманд. Новая версия
+    # приносит новые — без перевыпуска они у панели отказывают с sudo.
+    if panel_installed 2>/dev/null; then
+        log_info "Обновляем права sudo у панели под новые команды..."
+        panel_grant >/dev/null 2>&1 \
+            && log_success "Панель получила права на команды v${_new_ver}" \
+            || log_warn "Права не обновились — выполните: mtproxyl panel install"
+    fi
+
     if [ "$_restart" = "false" ]; then
         return 0
     fi
@@ -917,11 +994,37 @@ handle_port_command() {
         # Правила гео-блокировки прибиты к порту: после смены они остались
         # бы висеть на старом и не защищали новый.
         if [ -n "${BLOCKLIST_COUNTRIES:-}" ] && [ "$_port_before" != "$PROXY_PORT" ]; then
-            log_info "Перенос правил гео-блокировки на порт ${PROXY_PORT}..."
+            log_info "Перенос правил гео-блокировки на порты $(geoblock_ports_label)..."
             geoblock_remove_all >/dev/null 2>&1 || true
             geoblock_reapply_all >/dev/null 2>&1 || true
             geoblock_rules_active && log_success "Гео-блокировка переприменена" \
                 || log_warn "Гео-блокировку переприменить не удалось: mtproxyl geoblock reapply"
+        fi
+        # Zapret2 и SYN-лимитер тоже прибиты к порту: без переприменения они
+        # защищали бы старый, а новый оставался бы открытым.
+        if [ "$_port_before" != "$PROXY_PORT" ]; then
+            # NFT_ENABLED и ZAPRET2_APPLIED живут в nft-rules.conf, а не в settings.conf.
+            load_nft_settings 2>/dev/null || true
+            if zapret2_in_effect 2>/dev/null; then
+                log_info "Перенос правил zapret2 на порт ${PROXY_PORT}..."
+                # Стартовый скрипт службы держит порт у себя и перетирает
+                # правила при перезапуске — переписываем и его.
+                zapret2_write_conf >/dev/null 2>&1 || true
+                zapret2_write_service >/dev/null 2>&1 || true
+                systemctl daemon-reload >/dev/null 2>&1 || true
+                if systemctl restart "${ZAPRET2_SERVICE:-mtproxyl-zapret2.service}" >/dev/null 2>&1 \
+                   && zapret2_apply_nft >/dev/null 2>&1; then
+                    log_success "Zapret2 переприменён"
+                else
+                    log_warn "Zapret2 переприменить не удалось: mtproxyl zapret2 apply"
+                fi
+            fi
+            if [ "${NFT_ENABLED:-false}" = "true" ]; then
+                log_info "Перенос правил SYN-лимитера на порт ${PROXY_PORT}..."
+                apply_nft_rules >/dev/null 2>&1 \
+                    && log_success "SYN-лимитер переприменён" \
+                    || log_warn "SYN-лимитер переприменить не удалось: mtproxyl nft apply"
+            fi
         fi
         if is_proxy_running; then
             load_secrets
@@ -987,8 +1090,7 @@ handle_domain_command() {
         if [ "$MASKING_ENABLED" = "true" ] && [ "$PROXY_DOMAIN" != "$_old_domain" ]; then
             local _cur_mask="${MASKING_HOST:-$_old_domain}"
             if [ "$_cur_mask" = "$_old_domain" ] || [ -z "$MASKING_HOST" ]; then
-                echo -en "  ${BOLD}Обновить mask backend на ${PROXY_DOMAIN}? [Y/n]:${NC} "
-                local _mask_yn; read_line _mask_yn
+                local _mask_yn; read_line _mask_yn "  ${BOLD}Обновить mask backend на ${PROXY_DOMAIN}? [Y/n]:${NC} "
                 if [[ ! "$_mask_yn" =~ ^[nN] ]]; then
                     MASKING_HOST="$PROXY_DOMAIN"
                     save_settings
@@ -1098,7 +1200,7 @@ show_cli_help() {
     echo -e "  ${BOLD}Телеграм-бот:${NC}   tgbot status|install|setup|start|stop|restart|logs|uninstall"
     echo -e "  ${BOLD}Бот-сторож:${NC}     alertbot status|install|update|set|use|uninstall"
     echo -e "  ${BOLD}PQ проверка:${NC}    pq-check [домен[:порт]]"
-    echo -e "  ${BOLD}Безопасность:${NC}   geoblock add|remove|list | upstream list|add|remove | sni-policy"
+    echo -e "  ${BOLD}Безопасность:${NC}   geoblock add|remove|mode|list | upstream list|add|remove | sni-policy"
     echo -e "  ${BOLD}Мониторинг:${NC}     traffic | connections | metrics [live] | logs | health | info"
     echo -e "  ${BOLD}История IP:${NC}     ip-history status|flush|on|off"
     echo -e "  ${BOLD}Доступность:${NC}    availability status|check|details|target|on|off|interval|token"

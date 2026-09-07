@@ -85,6 +85,7 @@ export type MtproxylMode = 'manager' | 'reanimator';
 
 export interface MtproxylModeStatus {
   mode: MtproxylMode;
+  proxy_mode?: 'mtproto' | 'web' | 'combined';
   /** Чем менеджер держит движок: docker (контейнер) или binary (служба). */
   engine?: string;
   detected_mode: string;
@@ -113,6 +114,10 @@ export interface SelfmaskStatus {
   auto_renew: boolean;
   nginx_conf: string;
   nginx_conf_exists: boolean;
+  nginx_custom_enabled: boolean;
+  nginx_custom_active: boolean;
+  nginx_custom_file: string;
+  nginx_custom_file_exists: boolean;
   cert_found: boolean;
   pq_nginx_active: boolean;
   /** Чем проверять домен на PQ: описание источника, пусто — нечем. */
@@ -124,6 +129,47 @@ export interface SelfmaskStatus {
   prev_saved?: boolean;
   /** Fake SNI, который стоял до Selfmask; пусто, если его не было. */
   prev_domain?: string;
+}
+
+export interface WebStatus {
+  enabled: boolean;
+  proxy_mode: string;
+  mtproto_enabled?: boolean;
+  frontend: string;
+  haproxy_ready: boolean;
+  haproxy_cert: string;
+  /** shared — один публичный порт на двоих, split — у WEB свой. */
+  layout: string;
+  public_port: number;
+  proxy_port: number;
+  domain: string;
+  carrier: string;
+  secret_mode: string;
+  public_addr: string;
+  listen_port: number;
+  tls_port: number;
+  mtproxy_port: number;
+  decoy_mode: string;
+  decoy_source: string;
+  decoy_dir: string;
+  debug: boolean;
+  /** Что мешает включению, через точку с запятой. Пусто — можно включать. */
+  problems: string;
+}
+
+export interface WebParam {
+  key: string;
+  validator: string;
+  desc: string;
+  value: string;
+}
+
+export interface GeoblockStatus {
+  mode: 'blacklist' | 'whitelist';
+  rules_active: boolean;
+  ports_match: boolean;
+  service_enabled: boolean;
+  countries: string[];
 }
 
 export interface SelfmaskParam {
@@ -288,6 +334,43 @@ export const mtproxylApi = {
     request<{ output: string }>(MTPROXYL_BASE, '/selfmask/verify', { method: 'POST' }),
   selfmaskDisable: () =>
     request<{ output: string }>(MTPROXYL_BASE, '/selfmask/disable', { method: 'POST' }),
+  selfmaskNginxConfig: () =>
+    request<{ content: string }>(MTPROXYL_BASE, '/selfmask/nginx-config'),
+  writeSelfmaskNginxConfig: (content: string) =>
+    request<{ output: string }>(MTPROXYL_BASE, '/selfmask/nginx-config', {
+      method: 'PUT',
+      body: JSON.stringify({ content }),
+    }),
+  toggleSelfmaskNginxConfig: (enabled: boolean) =>
+    request<MtproxylOperation>(MTPROXYL_BASE, '/selfmask/nginx-config/toggle', {
+      method: 'POST',
+      body: JSON.stringify({ enabled }),
+    }),
+  testSelfmaskNginxConfig: () =>
+    request<{ output: string }>(MTPROXYL_BASE, '/selfmask/nginx-config/test', { method: 'POST' }),
+
+  web: () => request<WebStatus>(MTPROXYL_BASE, '/web'),
+  webParams: () => request<WebParam[]>(MTPROXYL_BASE, '/web/params'),
+  setWebParam: (key: string, value: string) =>
+    request<{ output: string }>(MTPROXYL_BASE, '/web/params', {
+      method: 'POST',
+      body: JSON.stringify({ key, value }),
+    }),
+  webEnable: () =>
+    request<MtproxylOperation>(MTPROXYL_BASE, '/web/enable', { method: 'POST' }),
+  webDisable: () =>
+    request<MtproxylOperation>(MTPROXYL_BASE, '/web/disable', { method: 'POST' }),
+  webMode: (mode: 'web' | 'combined') =>
+    request<MtproxylOperation>(MTPROXYL_BASE, '/web/mode', {
+      method: 'POST',
+      body: JSON.stringify({ mode }),
+    }),
+  webLinks: () => request<{ output: string }>(MTPROXYL_BASE, '/web/links'),
+  webHAProxyConfig: () => request<{ output: string }>(MTPROXYL_BASE, '/web/haproxy-config'),
+  // Профиль WEB движок сам не заводит: пользователь, созданный через его
+  // /v1/users, попадает только в [access.users] и остаётся без WEB-ссылки.
+  webSync: () =>
+    request<{ output: string }>(MTPROXYL_BASE, '/web/sync', { method: 'POST' }),
 
   backups: () => request<MtproxylBackup[]>(MTPROXYL_BASE, '/backups'),
   createBackup: () =>
@@ -524,7 +607,7 @@ export const mtproxylNetApi = {
     }),
   ipblockExportUrl: () => `${MTPROXYL_BASE}/ipblock/export`,
 
-  geoblock: () => request<{ countries: string[] }>(MTPROXYL_BASE, '/geoblock'),
+  geoblock: () => request<GeoblockStatus>(MTPROXYL_BASE, '/geoblock'),
   geoblockAdd: (country: string) =>
     request<MtproxylOperation>(MTPROXYL_BASE, '/geoblock', {
       method: 'POST',
@@ -533,6 +616,15 @@ export const mtproxylNetApi = {
   geoblockRemove: (country: string) =>
     request<{ output: string }>(MTPROXYL_BASE, `/geoblock/${encodeURIComponent(country)}`, {
       method: 'DELETE',
+    }),
+  geoblockMode: (mode: 'blacklist' | 'whitelist') =>
+    request<MtproxylOperation>(MTPROXYL_BASE, '/geoblock/mode', {
+      method: 'PUT',
+      body: JSON.stringify({ mode }),
+    }),
+  geoblockReapply: () =>
+    request<MtproxylOperation>(MTPROXYL_BASE, '/geoblock/reapply', {
+      method: 'POST',
     }),
 
   upstreams: () => request<Upstream[]>(MTPROXYL_BASE, '/upstreams'),
@@ -943,6 +1035,26 @@ export interface WarpStatusResponse {
   status?: WarpStatus;
 }
 
+export interface WarpScanNode {
+  node: string;
+  endpoint: string;
+  ping: string;
+  region: string;
+  location: string;
+}
+
+export interface WarpScanResult {
+  scanned_at: number;
+  proto?: string;
+  filter?: string;
+  nodes: WarpScanNode[];
+}
+
+export interface WarpScanResponse {
+  supported: boolean;
+  scan?: WarpScanResult;
+}
+
 export interface WarpSettingsPatch {
   location?: string;
   endpoint?: string;
@@ -958,6 +1070,7 @@ export const warpApi = {
     }),
   disable: () => request<MtproxylOperation>(WARP_BASE, '/disable', { method: 'POST' }),
   scan: () => request<MtproxylOperation>(WARP_BASE, '/scan', { method: 'POST' }),
+  lastScan: () => request<WarpScanResponse>(WARP_BASE, '/scan'),
   reapply: () => request<MtproxylOperation>(WARP_BASE, '/reapply', { method: 'POST' }),
   save: (patch: WarpSettingsPatch) =>
     request<WarpStatusResponse>(WARP_BASE, '/settings', {

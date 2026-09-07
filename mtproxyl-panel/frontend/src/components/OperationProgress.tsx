@@ -5,6 +5,10 @@ const OPERATION_LABELS: Record<string, string> = {
   'mode:manager': 'Переключение в режим Manager',
   'mode:reanimator': 'Переключение в режим Reanimator',
   'selfmask:apply': 'Настройка Selfmask',
+  'selfmask:nginx-custom-on': 'Включение пользовательского nginx.conf',
+  'selfmask:nginx-custom-off': 'Возврат стандартного nginx.conf',
+  'web:enable': 'Включение WEB Proxy',
+  'web:disable': 'Отключение WEB Proxy',
   'selfmask:pq-install': 'Установка PQ OpenSSL',
   'backup:restore': 'Восстановление из бэкапа',
   'nft:apply': 'Применение правил лимитера',
@@ -23,6 +27,9 @@ const OPERATION_LABELS: Record<string, string> = {
   'nft:zapret2-wscale': 'Настройка окна Zapret2',
   'nft:preset:classic': 'Переключение лимитера в classic',
   'nft:preset:smart': 'Переключение лимитера в smart',
+  'geoblock:mode:blacklist': 'Включение блокировки выбранных стран',
+  'geoblock:mode:whitelist': 'Включение доступа только выбранным странам',
+  'geoblock:reapply': 'Переприменение блокировки стран',
   'tgbot:install': 'Установка телеграм-бота',
   'alertbot:install': 'Установка бота-сторожа',
   'alertbot:service': 'Обновление бота-сторожа',
@@ -34,7 +41,7 @@ function label(name?: string): string {
   if (OPERATION_LABELS[name]) return OPERATION_LABELS[name];
   // Имена вида "geoblock:add:ir" собираются с аргументом на конце.
   if (name.startsWith('geoblock:add:')) {
-    return `Блокировка страны ${name.slice('geoblock:add:'.length).toUpperCase()}`;
+    return `Добавление страны ${name.slice('geoblock:add:'.length).toUpperCase()}`;
   }
   return name;
 }

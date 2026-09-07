@@ -194,29 +194,34 @@ secret_add() {
 
     log_success "Секрет '${label}' создан"
     echo ""
-    _print_secret_links "$server_ip" "$server_port" "$raw_secret" "true"
+    _print_secret_links "$server_ip" "$server_port" "$raw_secret"
     echo ""
 }
 
-# Ссылки одного секрета всех включённых видов. QR — только на первую: с
-# выключенной маскировкой видов два, и два QR-кода в терминале не помещаются.
+# Ссылки одного секрета всех включённых видов. QR в терминале не рисуем:
+# в узком окне он рассыпается, а ссылку всё равно копируют текстом.
 _print_secret_links() {
-    local _ip="$1" _port="$2" _raw="$3" _qr="${4:-false}"
-    local _kind _sec _first=1 _title
-    while IFS='|' read -r _kind _sec; do
+    local _ip="$1" _port="$2" _raw="$3"
+    local _kind _sec _title
+    while mtproto_is_enabled 2>/dev/null && IFS='|' read -r _kind _sec; do
         [ -n "$_sec" ] || continue
         _title="$(link_kind_title "$_kind")"
         echo -e "  ${BOLD}Ссылка для Telegram${NC} ${DIM}(${_title})${NC}"
         echo -e "  ${CYAN}tg://proxy?server=${_ip}&port=${_port}&secret=${_sec}${NC}"
         echo -e "  ${BOLD}Веб-ссылка${NC} ${DIM}(${_title})${NC}"
         echo -e "  ${CYAN}https://t.me/proxy?server=${_ip}&port=${_port}&secret=${_sec}${NC}"
-        if [ "$_qr" = "true" ] && [ $_first -eq 1 ] && command -v qrencode &>/dev/null; then
-            echo ""
-            qrencode -t ANSIUTF8 "tg://proxy?server=${_ip}&port=${_port}&secret=${_sec}" 2>/dev/null | sed 's/^/  /'
-        fi
-        _first=0
         echo ""
     done <<< "$(build_link_secrets "$_raw")"
+
+    # WEB — отдельный тип прокси со своим доменом и без порта в ссылке.
+    if web_is_enabled 2>/dev/null; then
+        local _wl; _wl=$(web_link_for_secret "$_raw" 2>/dev/null)
+        if [ -n "$_wl" ]; then
+            echo -e "  ${BOLD}Ссылка для Telegram${NC} ${DIM}(WEB)${NC}"
+            echo -e "  ${CYAN}${_wl}${NC}"
+            echo ""
+        fi
+    fi
 }
 
 # Удалить секрет
@@ -232,8 +237,7 @@ secret_remove() {
 
     if [ "$force" != "true" ] && [ -t 0 ]; then
         echo -e "  ${YELLOW}Удалить секрет '${label}'? Пользователи с этим ключом будут отключены.${NC}"
-        echo -en "  ${BOLD}Введите 'yes':${NC} "
-        local confirm; read_line confirm
+        local confirm; read_line confirm "  ${BOLD}Введите 'yes':${NC} "
         [ "$confirm" != "yes" ] && { log_info "Отменено"; return 0; }
     fi
 
@@ -659,10 +663,14 @@ get_proxy_links() {
     [ $idx -eq -1 ] && { log_error "Секрет '${label}' не найден"; return 1; }
 
     local _kind _sec
-    while IFS='|' read -r _kind _sec; do
+    while mtproto_is_enabled 2>/dev/null && IFS='|' read -r _kind _sec; do
         [ -n "$_sec" ] || continue
         echo "tg://proxy?server=${server_ip}&port=${server_port}&secret=${_sec}"
     done <<< "$(build_link_secrets "${SECRETS_KEYS[$idx]}")"
+
+    # WEB — отдельный тип прокси: свой домен, свой префикс секрета, без порта.
+    web_is_enabled 2>/dev/null && web_link_for_secret "${SECRETS_KEYS[$idx]}" 2>/dev/null
+    return 0
 }
 
 # Одна ссылка — первая из списка. Её ждут те, кто читает вывод строкой:
@@ -940,6 +948,22 @@ _target_user_limit() {
 # Ссылки строятся по конфигу цели, а не по нашим настройкам: домен и режим
 # маскировки у чужого движка свои. Может вернуть несколько строк — по одной
 # на каждый включённый вид ссылки.
+# WEB-ссылка идёт следом за обычными: движок её не отдаёт, а тип прокси
+# в клиенте отдельный.
+_target_web_link() {
+    local _label="$1" _raw
+    # В реаниматоре WEB поднимает сам владелец конфига — читаем оттуда.
+    if [ "${MTPROXYL_MODE:-manager}" = "reanimator" ]; then
+        web_target_link "$_label" 2>/dev/null || true
+        return 0
+    fi
+    web_is_enabled 2>/dev/null || return 0
+    web_link_for_label "$_label" 2>/dev/null && return 0
+    _raw=$(_target_user_secret "$_label" 2>/dev/null) || return 0
+    [ -n "$_raw" ] || return 0
+    web_link_for_secret "$_raw" 2>/dev/null || true
+}
+
 target_user_link() {
     local _label="$1" _raw _domain _mask _full _ip _port
 
@@ -953,6 +977,7 @@ target_user_link() {
     fi
     if [ -n "$_from_api" ]; then
         printf '%s' "$_from_api"
+        _target_web_link "$_label"
         return 0
     fi
 
@@ -972,7 +997,8 @@ target_user_link() {
     [ -n "$_ip" ] || _ip=$(get_public_ip)
     _port=$(_toml_get_string_in_section "general.links" "public_port" "$DETECTED_CONFIG_PATH")
     [ -n "$_port" ] || _port="${DETECTED_PORT:-443}"
-    printf 'tg://proxy?server=%s&port=%s&secret=%s' "$_ip" "$_port" "$_full"
+    printf 'tg://proxy?server=%s&port=%s&secret=%s\n' "$_ip" "$_port" "$_full"
+    _target_web_link "$_label"
 }
 
 # Успела ли цель подхватить правку сама. telemt следит за файлом конфига и
@@ -1077,8 +1103,7 @@ _target_users_apply() {
         log_success "Цель применила изменения на ходу — перезапуск не нужен"
         return 0
     fi
-    echo -en "  ${BOLD}Перезапустить цель, чтобы применить? [Y/n]:${NC} "
-    local _r; read_line _r
+    local _r; read_line _r "  ${BOLD}Перезапустить цель, чтобы применить? [Y/n]:${NC} "
     if [[ "$_r" =~ ^[nN] ]]; then
         log_info "Перезапуск отложен — изменения вступят в силу после restart"
         return 0
@@ -1113,6 +1138,10 @@ target_user_add() {
     log_success "Пользователь '${_label}' добавлен цели (${DETECTED_CONFIG_PATH})"
     [ -n "${TARGET_CONFIG_BACKUP:-}" ] && log_info "Резервная копия: ${TARGET_CONFIG_BACKUP}"
 
+    # Профиль WEB движок сам не заводит, а без него у пользователя нет
+    # WEB-ссылки — добавляем в паре с самим пользователем.
+    web_target_add_profile "$_label" || true
+
     local _link; _link=$(target_user_link "$_label")
     if [ -n "$_link" ]; then
         echo ""
@@ -1143,6 +1172,8 @@ target_user_remove() {
         _toml_safe_unset "$_label" "$_sect" "$DETECTED_CONFIG_PATH" 2>/dev/null || true
         _target_drop_empty_limit_section "$_sect" 2>/dev/null || true
     done
+    # Профиль на несуществующего пользователя движок конфигом не примет.
+    web_target_remove_profile "$_label" || true
     log_success "Пользователь '${_label}' удалён у цели"
     [ -n "${TARGET_CONFIG_BACKUP:-}" ] && log_info "Резервная копия: ${TARGET_CONFIG_BACKUP}"
     _target_users_apply
@@ -1433,15 +1464,9 @@ handle_target_user_command() {
             _echo_links "$_links"
             echo "" ;;
         qr)
+            # QR из терминала убран: остаются те же ссылки текстом.
             local _links; _links=$(target_user_link "${1:-}") || {
                 log_error "Пользователь '${1:-}' не найден у цели"; return 1; }
-            # QR — на первую ссылку: их у пользователя может быть несколько.
-            local _link; _link=$(printf '%s\n' "$_links" | head -1)
-            if command -v qrencode &>/dev/null; then
-                echo ""; qrencode -t ANSIUTF8 "$_link" | sed 's/^/  /'
-            else
-                echo -e "  ${DIM}qrencode не установлен: apt install qrencode${NC}"
-            fi
             _echo_links "$_links"
             echo "" ;;
         clone)
@@ -1464,7 +1489,7 @@ handle_target_user_command() {
             echo -e "    ${GREEN}secret adtag${NC} <метка> <32hex|remove>"
             echo -e "                              Рекламная метка пользователя"
             echo -e "    ${GREEN}secret link${NC} <метка>        Ссылка"
-            echo -e "    ${GREEN}secret qr${NC} <метка>          QR-код"
+            echo -e "    ${GREEN}secret qr${NC} <метка>          Ссылки (устар., = link)"
             ;;
     esac
 }
@@ -1525,14 +1550,8 @@ handle_secret_command() {
         clone)    check_root; secret_clone "$1" "$2" ;;
         rename)   check_root; secret_rename "$1" "$2" ;;
         qr)
+            # QR из терминала убран: остаются те же ссылки текстом.
             local links; links=$(get_proxy_links "${1:-}") || return 1
-            local link; link=$(printf '%s\n' "$links" | head -1)
-            if command -v qrencode &>/dev/null; then
-                echo ""; qrencode -t ANSIUTF8 "$link" | sed 's/^/  /'
-            else
-                echo -e "  ${DIM}qrencode не установлен: apt install qrencode${NC}"
-            fi
-            # QR один — на первую ссылку, но остальные виды тоже рабочие.
             _echo_links "$links"
             echo "" ;;
         *)
@@ -1546,7 +1565,7 @@ handle_secret_command() {
             echo -e "    ${GREEN}secret limits${NC} [метка]     Лимиты"
             echo -e "    ${GREEN}secret setlimits${NC} <метка> <соед> <ip> <квота> [срок]"
             echo -e "    ${GREEN}secret link${NC} [метка]       Ссылка"
-            echo -e "    ${GREEN}secret qr${NC} [метка]         QR-код"
+            echo -e "    ${GREEN}secret qr${NC} [метка]         Ссылки (устар., = link)"
             echo -e "    ${GREEN}secret clone${NC} <из> <в>     Клонировать"
             echo -e "    ${GREEN}secret rename${NC} <из> <в>    Переименовать"
             ;;

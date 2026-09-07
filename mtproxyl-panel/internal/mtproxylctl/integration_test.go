@@ -25,7 +25,13 @@ case "$1 $2 $3" in
     echo '{"mode":"manager","detected_mode":"unknown","detected_config":"","port":443}'
     ;;
   "selfmask status --json")
-    echo '{"enabled":true,"domain":"example.com","site_source":"stub","site_dir":"/var/www/x","backend_port":8444,"cert_mode":"selfsigned","auto_renew":false,"nginx_conf":"/etc/nginx/x.conf","nginx_conf_exists":true,"cert_found":true,"pq_nginx_active":true}'
+    echo '{"enabled":true,"domain":"example.com","site_source":"stub","site_dir":"/var/www/x","backend_port":8444,"cert_mode":"selfsigned","auto_renew":false,"nginx_conf":"/opt/mtproxyl/nginx-custom.conf","nginx_conf_exists":true,"nginx_custom_enabled":true,"nginx_custom_active":true,"nginx_custom_file":"/opt/mtproxyl/nginx-custom.conf","nginx_custom_file_exists":true,"cert_found":true,"pq_nginx_active":true}'
+    ;;
+  "selfmask nginx-config show")
+    printf 'worker_processes auto;\nevents {}\n'
+    ;;
+  "selfmask nginx-config write")
+    cat
     ;;
   "backup list --json")
     echo '[{"name":"mtproxyl-20260101-101010.tar.gz","size":123,"mtime":1767000000}]'
@@ -33,6 +39,21 @@ case "$1 $2 $3" in
   "backup  ")
     echo "  [✓] Бэкап создан: /opt/mtproxyl/backups/mtproxyl-20260202-121212.tar.gz"
     echo "/opt/mtproxyl/backups/mtproxyl-20260202-121212.tar.gz"
+    ;;
+  "geoblock list --json")
+    echo '{"mode":"whitelist","rules_active":true,"ports_match":true,"service_enabled":true,"countries":["ru","kz"]}'
+    ;;
+  "geoblock mode whitelist")
+    echo "  [✓] Режим: разрешать только выбранные"
+    ;;
+  "geoblock reapply ")
+    echo "  [✓] Гео-блокировка применена"
+    ;;
+  "web json ")
+    echo '{"enabled":true,"proxy_mode":"combined","mtproto_enabled":true,"frontend":"haproxy","haproxy_ready":true,"haproxy_cert":"/etc/haproxy/certs/web.example.com.pem","layout":"shared","public_port":443,"proxy_port":443,"domain":"web.example.com","carrier":"websocket","secret_mode":"dd","public_addr":"203.0.113.10:443","listen_port":15080,"tls_port":15444,"mtproxy_port":15443,"decoy_mode":"static_directory","decoy_source":"stub","decoy_dir":"/var/www/x","debug":false,"problems":""}'
+    ;;
+  "web haproxy-config ")
+    printf 'frontend mtproxyl_public\n    bind :443\n'
     ;;
   "mode manager ")
     echo "  [✓] Режим: manager"
@@ -97,7 +118,7 @@ func TestAgainstStubCLI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SelfmaskStatus: %v", err)
 	}
-	if !sm.Enabled || sm.Domain != "example.com" || sm.BackendPort != 8444 {
+	if !sm.Enabled || sm.Domain != "example.com" || sm.BackendPort != 8444 || !sm.NginxCustomActive {
 		t.Errorf("unexpected selfmask status: %+v", sm)
 	}
 
@@ -123,6 +144,25 @@ func TestAgainstStubCLI(t *testing.T) {
 	// when leaving manager.
 	if err := c.SwitchMode(ctx, ModeManager, ""); err != nil {
 		t.Errorf("SwitchMode: %v", err)
+	}
+}
+
+func TestSelfmaskNginxConfigRoundTrip(t *testing.T) {
+	c := newStubClient(t)
+	ctx := context.Background()
+
+	config, err := c.SelfmaskNginxConfig(ctx)
+	if err != nil || !strings.Contains(config, "worker_processes") {
+		t.Fatalf("SelfmaskNginxConfig() = %q, %v", config, err)
+	}
+
+	want := "worker_processes 2;\nevents {}\n"
+	out, err := c.WriteSelfmaskNginxConfig(ctx, want)
+	if err != nil {
+		t.Fatalf("WriteSelfmaskNginxConfig: %v", err)
+	}
+	if out != want {
+		t.Fatalf("written config = %q, want %q", out, want)
 	}
 }
 

@@ -51,6 +51,7 @@ func TestMtproxylRoutesRequireAuth(t *testing.T) {
 		"/api/mtproxyl/status",
 		"/api/mtproxyl/mode",
 		"/api/mtproxyl/selfmask",
+		"/api/mtproxyl/web/haproxy-config",
 		"/api/mtproxyl/backups",
 		"/api/mtproxyl/backups/mtproxyl-20260101-101010.tar.gz/download",
 	} {
@@ -287,6 +288,11 @@ func TestGeoblockRejectsBadCountry(t *testing.T) {
 	mux.ServeHTTP(rec, authedRequest(t, http.MethodPost, "/api/mtproxyl/geoblock", `{"country":"us; id"}`))
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("add: got %d, want 400", rec.Code)
+	}
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, authedRequest(t, http.MethodPut, "/api/mtproxyl/geoblock/mode", `{"mode":"whitelist; id"}`))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("geoblock mode injection status = %d, want 400", rec.Code)
 	}
 
 	rec = httptest.NewRecorder()

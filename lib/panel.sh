@@ -153,8 +153,7 @@ panel_install() {
         log_info "Панель уже установлена: $(panel_status_line)"
         if [ "$_mode" != "--update" ]; then
             echo ""
-            echo -en "  ${BOLD}Запустить установщик повторно (обновление/перенастройка)? [y/N]:${NC} "
-            local _yn; read_line _yn
+            local _yn; read_line _yn "  ${BOLD}Запустить установщик повторно (обновление/перенастройка)? [y/N]:${NC} "
             [[ "$_yn" =~ ^[yY] ]] || { log_info "Отменено"; return 0; }
         fi
     elif [ "$_mode" = "--update" ]; then
@@ -234,13 +233,28 @@ panel_install() {
     log_info "Панель можно собрать из исходников ветки ${GITHUB_BRANCH}"
     _panel_report_build_toolchain
     log_info "Нужен git; сборка занимает несколько минут"
-    echo -en "  ${BOLD}Собрать из исходников? [y/N]:${NC} "
-    local _yn; read_line _yn
+    local _yn; read_line _yn "  ${BOLD}Собрать из исходников? [y/N]:${NC} "
     [[ "$_yn" =~ ^[yY] ]] || { log_info "Отменено"; return 1; }
 
     sh "$_tmp" install "--from-source=${GITHUB_BRANCH}" \
         || { log_error "Сборка из исходников не удалась (причина выше)"; return 1; }
     _panel_install_report
+}
+
+# Права sudo у панели — список разрешённых подкоманд. Новая версия панели
+# зовёт команды, которых в старом списке нет, поэтому список надо перевыпускать
+# при каждом обновлении — и MTProxyL, и самой панели.
+panel_grant() {
+    check_root || return 1
+    panel_installed || { log_error "Панель не установлена"; return 1; }
+
+    local _tmp; _tmp=$(_mktemp) || return 1
+    if ! curl -fsSL "$PANEL_INSTALLER_URL" -o "$_tmp"; then
+        log_error "Не удалось скачать установщик панели"
+        return 1
+    fi
+    sh "$_tmp" grant || { log_error "Права выдать не удалось (причина выше)"; return 1; }
+    panel_grant_engine_journal
 }
 
 # Чем будет собираться панель из исходников. С движком-бинарником Docker на
@@ -331,8 +345,7 @@ _panel_offer_cert_after_install() {
     fi
 
     echo ""
-    echo -en "  ${BOLD}Выпустить сертификат Let's Encrypt сейчас? [Y/n]:${NC} "
-    local _yn; read_line _yn
+    local _yn; read_line _yn "  ${BOLD}Выпустить сертификат Let's Encrypt сейчас? [Y/n]:${NC} "
     if [[ "$_yn" =~ ^[nN] ]]; then
         log_info "Позже: mtproxyl panel cert ${_domain} (меню панели → [6])"
         return 0
@@ -350,8 +363,7 @@ panel_uninstall() {
     if [ "${1:-}" != "--no-confirm" ]; then
         echo ""
         log_warn "Панель, служба и права sudo будут удалены"
-        echo -en "  ${BOLD}Продолжить? [Y/n]:${NC} "
-        local _yn; read_line _yn
+        local _yn; read_line _yn "  ${BOLD}Продолжить? [Y/n]:${NC} "
         [[ "$_yn" =~ ^[nN] ]] && { log_info "Отменено"; return 0; }
     fi
 
@@ -361,8 +373,7 @@ panel_uninstall() {
     echo -e "  ${DIM}Конфиг ${PANEL_CONFIG_DIR}/config.toml хранит логин и пароль.${NC}"
     echo -e "  ${DIM}Если оставить, при новой установке мастер будет пропущен${NC}"
     echo -e "  ${DIM}и пароль останется прежним.${NC}"
-    echo -en "  ${BOLD}Удалить конфиг и данные тоже? [Y/n]:${NC} "
-    local _purge; read_line _purge
+    local _purge; read_line _purge "  ${BOLD}Удалить конфиг и данные тоже? [Y/n]:${NC} "
     local _cmd="purge"
     [[ "$_purge" =~ ^[nN] ]] && _cmd="uninstall"
 
@@ -707,15 +718,13 @@ panel_issue_cert() {
         log_info "а он шифрует соединение сам. Чтобы открыть панель наружу,"
         log_info "смените listen в ${PANEL_CONFIG_DIR}/config.toml и перезапустите её."
         echo ""
-        echo -en "  ${BOLD}Всё равно выпустить? [y/N]:${NC} "
-        local _yn_local; read_line _yn_local
+        local _yn_local; read_line _yn_local "  ${BOLD}Всё равно выпустить? [y/N]:${NC} "
         [[ "$_yn_local" =~ ^[yY] ]] || { log_info "Отменено"; return 0; }
     fi
 
     if [ -z "$_domain" ]; then
         local _suggest; _suggest=$(panel_cert_domain 2>/dev/null)
-        echo -en "  ${BOLD}Домен панели${_suggest:+ [${_suggest}]}:${NC} "
-        read_line _domain
+        read_line _domain "  ${BOLD}Домен панели${_suggest:+ [${_suggest}]}:${NC} "
         [ -n "$_domain" ] || _domain="$_suggest"
     fi
     [ -n "$_domain" ] || { log_error "Домен не задан"; return 1; }
@@ -754,8 +763,7 @@ panel_issue_cert() {
     if [ -z "$_email" ]; then
         echo -e "  ${DIM}Email нужен только для писем об истечении сертификата.${NC}"
         echo -e "  ${DIM}Можно оставить пустым — выпуск от этого не зависит.${NC}"
-        echo -en "  ${BOLD}Email для Let's Encrypt${SELFMASK_CERT_EMAIL:+ [${SELFMASK_CERT_EMAIL}]}:${NC} "
-        read_line _email
+        read_line _email "  ${BOLD}Email для Let's Encrypt${SELFMASK_CERT_EMAIL:+ [${SELFMASK_CERT_EMAIL}]}:${NC} "
         [ -n "$_email" ] || _email="${SELFMASK_CERT_EMAIL:-}"
     fi
 
@@ -792,8 +800,7 @@ panel_issue_cert() {
             echo -e "  ${DIM}На время выпуска эти службы будут остановлены и сразу запущены обратно.${NC}"
             echo -e "  ${DIM}Обычно это несколько секунд.${NC}"
             echo ""
-            echo -en "  ${BOLD}Продолжить? [Y/n]:${NC} "
-            local _yn; read_line _yn
+            local _yn; read_line _yn "  ${BOLD}Продолжить? [Y/n]:${NC} "
             [[ "$_yn" =~ ^[nN] ]] && { log_info "Отменено"; return 0; }
 
             local _svc
@@ -847,6 +854,7 @@ handle_panel_command() {
     case "${1:-status}" in
         install)   panel_install ;;
         update)    panel_install --update ;;
+        grant)     panel_grant ;;
         uninstall) panel_uninstall ;;
         restart)   panel_restart ;;
         disable|off) panel_disable ;;
@@ -859,6 +867,7 @@ handle_panel_command() {
             echo -e "    ${GREEN}panel status${NC}     Состояние"
             echo -e "    ${GREEN}panel install${NC}    Установить / переустановить"
             echo -e "    ${GREEN}panel update${NC}     Обновить до последней версии"
+            echo -e "    ${GREEN}panel grant${NC}      Перевыпустить права sudo под текущие команды"
             echo -e "    ${GREEN}panel restart${NC}    Перезапустить"
             echo -e "    ${GREEN}panel disable${NC}    Выключить, не удаляя (снять с автозапуска)"
             echo -e "    ${GREEN}panel enable${NC}     Включить обратно"

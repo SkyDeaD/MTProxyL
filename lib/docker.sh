@@ -55,6 +55,78 @@ wait_for_docker() {
     return 1
 }
 
+# Образ из готового бинарника: скачиваем ассет релиза с проверкой sha256 и
+# кладём в scratch. Бинарник musl статический, шелла и пакетного менеджера в
+# образе нет; root оставляем — движку нужен 443 и запись состояния.
+_build_telemt_image_from_release() {
+    local _version="$1"
+    local _tag="${TELEMT_MIN_VERSION}"
+    local _arch
+    case "$(uname -m)" in
+        x86_64|amd64)  _arch="x86_64" ;;
+        aarch64|arm64) _arch="aarch64" ;;
+        *) return 1 ;;
+    esac
+    local _asset="telemt-${_arch}-linux-musl.tar.gz"
+    local _base="https://github.com/${TELEMT_GITHUB}/releases/download/${_tag}"
+
+    local _dir; _dir=$(mktemp -d "${TMPDIR:-/tmp}/mtproxyl-relimg.XXXXXX") || return 1
+    log_info "Скачивание бинарника telemt ${_tag} (${_arch})..."
+    if ! curl -fsSL --retry 3 --max-time 120 "${_base}/${_asset}" -o "${_dir}/${_asset}"; then
+        rm -rf "$_dir"; return 1
+    fi
+    if curl -fsSL --retry 3 --max-time 30 "${_base}/${_asset}.sha256" -o "${_dir}/${_asset}.sha256"; then
+        if ! (cd "$_dir" && sha256sum -c "${_asset}.sha256" >/dev/null 2>&1); then
+            log_warn "Контрольная сумма бинарника не сошлась — берём другой путь"
+            rm -rf "$_dir"; return 1
+        fi
+    else
+        log_warn "Файл контрольной суммы не скачался — проверить нечем"
+        rm -rf "$_dir"; return 1
+    fi
+    if ! tar -xzf "${_dir}/${_asset}" -C "$_dir" 2>/dev/null || [ ! -f "${_dir}/telemt" ]; then
+        rm -rf "$_dir"; return 1
+    fi
+    # scratch не даст ни линковщика, ни libc: динамический бинарник там молча
+    # не запустится, поэтому проверяем до сборки.
+    if command -v readelf >/dev/null 2>&1 && \
+       readelf -lW "${_dir}/telemt" 2>/dev/null | grep -q "Requesting program interpreter"; then
+        log_warn "Бинарник релиза динамический — образ из него не собрать"
+        rm -rf "$_dir"; return 1
+    fi
+    chmod 755 "${_dir}/telemt"
+
+    # Корневые сертификаты нужны движку для getProxyConfig по HTTPS.
+    local _ca=""
+    for _ca in /etc/ssl/certs/ca-certificates.crt /etc/pki/tls/certs/ca-bundle.crt; do
+        [ -f "$_ca" ] && break || _ca=""
+    done
+    [ -n "$_ca" ] || { log_warn "Не найден набор корневых сертификатов"; rm -rf "$_dir"; return 1; }
+    cp "$_ca" "${_dir}/ca-certificates.crt"
+
+    cat > "${_dir}/Dockerfile" << 'DOCKERFILE_EOF'
+FROM scratch
+COPY ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY telemt /usr/local/bin/telemt
+STOPSIGNAL SIGINT
+ENTRYPOINT ["/usr/local/bin/telemt"]
+DOCKERFILE_EOF
+
+    local _platform=""
+    case "$(uname -m)" in
+        x86_64|amd64)  _platform="linux/amd64" ;;
+        aarch64|arm64) _platform="linux/arm64" ;;
+    esac
+    local _cmd=(docker build -t "${DOCKER_IMAGE_BASE}:${_version}")
+    [ -n "$_platform" ] && _cmd+=(--platform "$_platform")
+    _cmd+=("$_dir")
+
+    if "${_cmd[@]}" >/dev/null 2>&1; then
+        rm -rf "$_dir"; return 0
+    fi
+    rm -rf "$_dir"; return 1
+}
+
 build_telemt_image() {
     local force="${1:-false}"
     local commit="${TELEMT_COMMIT}"
@@ -86,7 +158,18 @@ build_telemt_image() {
         fi
     fi
 
-    # Стратегия 3: Сборка из исходников
+    # Стратегия 3: собрать образ вокруг официального бинарника релиза.
+    # Компиляция из исходников на слабой VPS занимает минуты и требует 2 ГБ
+    # памяти; готовый musl-бинарник статический, и образу хватает scratch.
+    # force=source — явная просьба собрать из исходников, её не подменяем.
+    if [ "$force" != "source" ] && _build_telemt_image_from_release "$version"; then
+        docker tag "${DOCKER_IMAGE_BASE}:${version}" "${DOCKER_IMAGE_BASE}:latest" 2>/dev/null || true
+        log_success "Собран telemt v${version} из релизного бинарника"
+        echo "$version" > "${INSTALL_DIR}/.telemt_version"
+        return 0
+    fi
+
+    # Стратегия 4: Сборка из исходников
     log_warn "Образ недоступен, компиляция из исходников..."
     local build_dir
     build_dir=$(mktemp -d "${TMPDIR:-/tmp}/mtproxyl-build.XXXXXX")
@@ -421,7 +504,10 @@ run_proxy_container() {
         build_telemt_image || { log_error "Не удалось собрать образ"; return 1; }
     fi
 
-    # Ensure we have at least one secret
+    # Пустой массив ещё не значит пустую базу: команда могла не звать
+    # load_secrets, а созданный здесь 'default' затрёт файл всеми своими
+    # пользователями. Перечитываем с диска, прежде чем что-то создавать.
+    [ ${#SECRETS_LABELS[@]} -eq 0 ] && { load_secrets 2>/dev/null || true; }
     if [ ${#SECRETS_LABELS[@]} -eq 0 ]; then
         log_info "Нет секретов, создаём default..."
         secret_add "default" "" "true"
@@ -450,7 +536,7 @@ run_proxy_container() {
     else
         docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
 
-        log_info "Запуск прокси на порту ${PROXY_PORT}..."
+        log_info "Запуск движка: $(proxy_transport_mode_title 2>/dev/null || echo MTProto)..."
         local _args=(
             --name "$CONTAINER_NAME"
             --restart unless-stopped
@@ -459,6 +545,13 @@ run_proxy_container() {
         )
         [ -n "${PROXY_CPUS}" ] && _args+=(--cpus "${PROXY_CPUS}")
         [ -n "${PROXY_MEMORY}" ] && _args+=(--memory "${PROXY_MEMORY}" --memory-swap "${PROXY_MEMORY}")
+
+        # Сайт-заглушку WEB движок читает с диска, а у контейнера своя ФС —
+        # без проброса он не стартует вовсе.
+        if web_is_enabled 2>/dev/null && [ "${WEB_DECOY_MODE:-empty}" != "http_upstream" ]; then
+            local _decoy; _decoy=$(web_effective_decoy_dir 2>/dev/null)
+            [ -d "$_decoy" ] && _args+=(-v "${_decoy}:${_decoy}:ro")
+        fi
 
         local _run_err=""
         _run_err=$(docker run -d "${_args[@]}" \
@@ -473,7 +566,12 @@ run_proxy_container() {
 
     sleep 2
     if is_proxy_running; then
-        log_success "Прокси запущен на порту ${PROXY_PORT}"
+        log_success "Прокси запущен: $(proxy_transport_mode_title 2>/dev/null || echo MTProto)"
+
+        # Внутри многошаговой операции ссылки здесь преждевременны: публичный
+        # порт ещё не настроен, и печатать нерабочие сейчас незачем — итог
+        # покажет сама операция, когда закончит.
+        [ "${MTPROXYL_QUIET_LINKS:-false}" = "true" ] && return 0
 
         local server_ip; server_ip=$(get_public_ip)
         [ -n "$server_ip" ] && {
@@ -482,10 +580,14 @@ run_proxy_container() {
             for i in "${!SECRETS_LABELS[@]}"; do
                 [ "${SECRETS_ENABLED[$i]}" = "true" ] || continue
                 local _kind _fs
-                while IFS='|' read -r _kind _fs; do
+                while mtproto_is_enabled 2>/dev/null && IFS='|' read -r _kind _fs; do
                     [ -n "$_fs" ] || continue
                     echo -e "  ${BOLD}${SECRETS_LABELS[$i]}${NC} ${DIM}($(link_kind_title "$_kind")):${NC} ${CYAN}tg://proxy?server=${server_ip}&port=${PROXY_PORT}&secret=${_fs}${NC}"
                 done <<< "$(build_link_secrets "${SECRETS_KEYS[$i]}")"
+                if web_is_enabled 2>/dev/null; then
+                    local _wl; _wl=$(web_link_for_secret "${SECRETS_KEYS[$i]}" 2>/dev/null)
+                    [ -n "$_wl" ] && echo -e "  ${BOLD}${SECRETS_LABELS[$i]}${NC} ${DIM}(WEB):${NC} ${CYAN}${_wl}${NC}"
+                fi
             done
             echo ""
         }
@@ -558,8 +660,17 @@ restart_proxy_container() {
 }
 
 reload_proxy_config() {
+    # [web.limits] принадлежит процессу: SIGHUP её не применит, и движок
+    # отвергнет конфиг, где профилей больше старого лимита.
+    local _web_limits_before=""
+    web_is_enabled 2>/dev/null && _web_limits_before=$(web_limits_fingerprint 2>/dev/null)
     generate_telemt_config || { log_error "Ошибка генерации конфига"; return 1; }
     flush_traffic_to_disk 2>/dev/null || true
+    if web_is_enabled 2>/dev/null && [ "$(web_limits_fingerprint 2>/dev/null)" != "$_web_limits_before" ]; then
+        log_info "Изменились лимиты WEB — нужен перезапуск движка, горячей перезагрузки мало"
+        restart_proxy_container
+        return
+    fi
     if engine_is_binary; then
         binengine_reload
     else
